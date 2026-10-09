@@ -1,0 +1,19 @@
+[package]
+name = "beach-viewer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive", "env"] }
+eframe = "0.36.2"
+egui = "0.36"
+env_logger = "0.11.11"
+log = "0.4.34"
+rfb = { version = "0.1.0", path = "../rfb" }
+serde = { version = "1.0", features = ["derive"] }
+toml = "1.1"
+
+[lints]
+workspace = true

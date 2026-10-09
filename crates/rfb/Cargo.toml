@@ -1,0 +1,14 @@
+[package]
+name = "rfb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+des = "0.8"
+flate2 = "1.1.10"
+rand = "0.10.3"
+thiserror = "2.0.21"
+
+[lints]
+workspace = true

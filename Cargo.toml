@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["crates/rfb", "crates/beach-server", "crates/beach-viewer"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/realS3BI/vnc-beach"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+[workspace.lints.clippy]
+chunks_exact_to_as_chunks = "allow"
