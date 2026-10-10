@@ -2,6 +2,7 @@
 
 use std::io::{BufReader, BufWriter, Write};
 use std::net::TcpStream;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, RecvTimeoutError};
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,6 +25,8 @@ pub struct Context {
     pub password: Option<String>,
     pub fps: u32,
     pub name: String,
+    /// Set when the server shuts down; sessions end at their next tick.
+    pub stop: Arc<AtomicBool>,
 }
 
 const TILE: usize = 64;
@@ -92,6 +95,9 @@ impl Session {
     ) -> anyhow::Result<()> {
         let tick = Duration::from_secs_f64(1.0 / ctx.fps as f64);
         loop {
+            if ctx.stop.load(Ordering::Acquire) {
+                return Ok(());
+            }
             match rx.recv_timeout(tick) {
                 Ok(msg) => self.handle(ctx, msg?)?,
                 Err(RecvTimeoutError::Timeout) => {}
@@ -104,7 +110,9 @@ impl Session {
 
             if ctx.clipboard.seq() != self.clipboard_seq {
                 self.clipboard_seq = ctx.clipboard.seq();
-                messages::write_server_cut_text(&mut self.out, &ctx.clipboard.text())?;
+                let text = ctx.clipboard.text();
+                log::debug!("sending clipboard: {} chars", text.chars().count());
+                messages::write_server_cut_text(&mut self.out, &text)?;
                 self.out.flush()?;
             }
             if let Some(incremental) = self.pending {
@@ -154,6 +162,7 @@ impl Session {
                 }
             }
             ClientMessage::ClientCutText(text) => {
+                log::debug!("viewer clipboard: {} chars", text.chars().count());
                 if ctx.input.is_some() {
                     ctx.clipboard.set(text);
                 }

@@ -1,0 +1,4 @@
+module BeachMobile {
+    header "beach_mobile.h"
+    export *
+}

@@ -1,3 +1,9 @@
 /target
 .DS_Store
 *.ppm
+# iOS app: local signing and Xcode Cloud configuration, Xcode user state
+apps/ios/Config/Signing.local.xcconfig
+apps/ios/Config/Cloud.xcconfig
+apps/ios/*.xcodeproj/xcuserdata/
+apps/ios/*.xcodeproj/project.xcworkspace/xcuserdata/
+apps/ios/DerivedData/

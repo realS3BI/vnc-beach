@@ -1,9 +1,10 @@
 //! Connects to a VNC server, fetches one full frame plus a few incremental
 //! updates and writes the screen as PPM. Handy for testing servers headless.
 //!
-//!     cargo run -p rfb --example snapshot -- 127.0.0.1:5900 password out.ppm [UPDATES]
+//!     cargo run -p rfb --example snapshot -- 127.0.0.1:5900 password out.ppm [UPDATES] [DEPTH]
 //!
-//! Incremental updates only arrive when the screen changes.
+//! Incremental updates only arrive when the screen changes. DEPTH is the
+//! requested colour depth: 24 (default), 16 or 8.
 
 use std::io::{BufReader, Write};
 use std::net::TcpStream;
@@ -17,10 +18,17 @@ use rfb::PixelFormat;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
-    let (addr, password, out, updates) = match &args[1..] {
-        [a, p, o] => (a, p, o, 1),
-        [a, p, o, n] => (a, p, o, n.parse()?),
-        _ => return Err("usage: snapshot HOST:PORT PASSWORD OUT.ppm [UPDATES]".into()),
+    let (addr, password, out, updates, depth) = match &args[1..] {
+        [a, p, o] => (a, p, o, 1, 24),
+        [a, p, o, n] => (a, p, o, n.parse()?, 24),
+        [a, p, o, n, d] => (a, p, o, n.parse()?, d.parse()?),
+        _ => return Err("usage: snapshot HOST:PORT PASSWORD OUT.ppm [UPDATES] [DEPTH]".into()),
+    };
+    let pf = match depth {
+        24 => PixelFormat::BGRX,
+        16 => PixelFormat::RGB565,
+        8 => PixelFormat::BGR233,
+        _ => return Err("DEPTH must be 24, 16 or 8".into()),
     };
     let started = Instant::now();
     let mut stream = TcpStream::connect(addr)?;
@@ -35,7 +43,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let (w, h) = (init.width as usize, init.height as usize);
-    let pf = PixelFormat::BGRX;
     let mut writer = stream.try_clone()?;
     ClientMessage::SetPixelFormat(pf).write(&mut writer)?;
     ClientMessage::SetEncodings(vec![encoding::ZRLE, encoding::RAW]).write(&mut writer)?;
@@ -62,10 +69,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let rgba = match r.encoding {
                 encoding::ZRLE => zrle.decode(&mut reader, &pf, rw, rh)?,
                 encoding::RAW => {
-                    let mut raw = vec![0; rw * rh * 4];
+                    let bpp = pf.bytes_per_pixel();
+                    let mut raw = vec![0; rw * rh * bpp];
                     std::io::Read::read_exact(&mut reader, &mut raw)?;
-                    raw.chunks_exact(4)
-                        .flat_map(|p| [p[2], p[1], p[0], 255])
+                    raw.chunks_exact(bpp)
+                        .flat_map(|p| {
+                            let [r, g, b] = pf.unpack(pf.get_pixel(p));
+                            [r, g, b, 255]
+                        })
                         .collect()
                 }
                 e => return Err(format!("unexpected encoding {e}").into()),

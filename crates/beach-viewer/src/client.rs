@@ -7,14 +7,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rfb::encoding;
-use rfb::handshake::client_handshake;
+use rfb::handshake::client_handshake_with_banner;
 use rfb::io::ReadExt;
 use rfb::messages::{ClientMessage, Rect, ServerMessage};
 use rfb::zrle::ZrleDecoder;
 use rfb::{Error, PixelFormat};
-
-/// We always ask for this format, so decoding has a fast path.
-const PIXEL_FORMAT: PixelFormat = PixelFormat::BGRX;
 
 pub struct Framebuffer {
     pub width: usize,
@@ -29,8 +26,27 @@ pub enum Notice {
     Closed(String),
 }
 
+/// What kind of server we are talking to; decides how modifier keys are sent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RemoteKind {
+    /// macOS Screen Sharing (banner `RFB 003.889`). It reads Alt_L as Cmd
+    /// and Meta_L as Option.
+    AppleScreenSharing,
+    /// VNC Beach's own server on a Mac: Super_L is Cmd, Alt_L is Option.
+    BeachMac,
+    /// Windows, Linux, anything else.
+    Other,
+}
+
+impl RemoteKind {
+    pub fn is_mac(self) -> bool {
+        self != RemoteKind::Other
+    }
+}
+
 pub struct Connection {
     pub name: String,
+    pub remote: RemoteKind,
     pub fb: Arc<Mutex<Framebuffer>>,
     pub notices: Receiver<Notice>,
     writer: Arc<Mutex<BufWriter<TcpStream>>>,
@@ -38,15 +54,19 @@ pub struct Connection {
 }
 
 impl Connection {
+    /// Connects, authenticates and asks the server for `pf` pixels.
     pub fn open(
         addr: &str,
         password: Option<&str>,
+        pf: PixelFormat,
         repaint: impl Fn() + Send + 'static,
     ) -> rfb::Result<Connection> {
         let mut stream = connect(addr)?;
         stream.set_nodelay(true)?;
         stream.set_read_timeout(Some(Duration::from_secs(15)))?;
-        let init = client_handshake(&mut stream, password)?;
+        let (init, banner) = client_handshake_with_banner(&mut stream, password)?;
+        let remote = detect(&banner, &init.name);
+        log::debug!("server {banner:?} {:?}: {remote:?}", init.name);
         stream.set_read_timeout(None)?;
 
         let (w, h) = (init.width as usize, init.height as usize);
@@ -57,7 +77,7 @@ impl Connection {
             generation: 0,
         }));
         let mut writer = BufWriter::new(stream.try_clone()?);
-        ClientMessage::SetPixelFormat(PIXEL_FORMAT).write(&mut writer)?;
+        ClientMessage::SetPixelFormat(pf).write(&mut writer)?;
         ClientMessage::SetEncodings(vec![
             encoding::ZRLE,
             encoding::COPY_RECT,
@@ -74,6 +94,7 @@ impl Connection {
             input: BufReader::with_capacity(1 << 20, stream.try_clone()?),
             output: writer.clone(),
             fb: fb.clone(),
+            pf,
             zrle: ZrleDecoder::new(),
             notices: tx,
             repaint: Box::new(repaint),
@@ -84,6 +105,7 @@ impl Connection {
 
         Ok(Connection {
             name: init.name,
+            remote,
             fb,
             notices,
             writer,
@@ -101,6 +123,17 @@ impl Connection {
 impl Drop for Connection {
     fn drop(&mut self) {
         let _ = self.stream.shutdown(Shutdown::Both);
+    }
+}
+
+/// macOS Screen Sharing announces RFB 003.889; our own server names its OS.
+fn detect(banner: &str, name: &str) -> RemoteKind {
+    if banner.contains("003.889") {
+        RemoteKind::AppleScreenSharing
+    } else if name.ends_with("(macOS)") {
+        RemoteKind::BeachMac
+    } else {
+        RemoteKind::Other
     }
 }
 
@@ -169,6 +202,7 @@ struct Reader {
     input: BufReader<TcpStream>,
     output: Arc<Mutex<BufWriter<TcpStream>>>,
     fb: Arc<Mutex<Framebuffer>>,
+    pf: PixelFormat,
     zrle: ZrleDecoder,
     notices: Sender<Notice>,
     repaint: Box<dyn Fn() + Send>,
@@ -232,13 +266,15 @@ impl Reader {
         }
         match r.encoding {
             encoding::RAW => {
-                let data = self.input.read_vec(w * h * PIXEL_FORMAT.bytes_per_pixel())?;
+                let bpp = self.pf.bytes_per_pixel();
+                let data = self.input.read_vec(w * h * bpp)?;
                 let mut fb = self.fb.lock().unwrap();
                 let stride = fb.width * 4;
-                for (row, src) in data.chunks_exact(w * 4).enumerate() {
+                for (row, src) in data.chunks_exact(w * bpp).enumerate() {
                     let dst = &mut fb.rgba[(y + row) * stride + x * 4..][..w * 4];
-                    for (d, s) in dst.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
-                        d.copy_from_slice(&[s[2], s[1], s[0], 255]);
+                    for (d, s) in dst.chunks_exact_mut(4).zip(src.chunks_exact(bpp)) {
+                        let [r, g, b] = self.pf.unpack(self.pf.get_pixel(s));
+                        d.copy_from_slice(&[r, g, b, 255]);
                     }
                 }
             }
@@ -255,7 +291,7 @@ impl Reader {
                 blit(&mut fb, x, y, w, &src);
             }
             encoding::ZRLE => {
-                let rgba = self.zrle.decode(&mut self.input, &PIXEL_FORMAT, w, h)?;
+                let rgba = self.zrle.decode(&mut self.input, &self.pf, w, h)?;
                 blit(&mut self.fb.lock().unwrap(), x, y, w, &rgba);
             }
             e => return Err(Error::Protocol(format!("server used unrequested encoding {e}"))),
@@ -274,6 +310,25 @@ fn blit(fb: &mut Framebuffer, x: usize, y: usize, w: usize, rgba: &[u8]) {
 #[cfg(test)]
 mod tests {
     use super::parse_address;
+
+    #[test]
+    fn detects_macs() {
+        use super::{detect, RemoteKind};
+        assert_eq!(
+            detect("RFB 003.889", "Sebastians Mac mini"),
+            RemoteKind::AppleScreenSharing
+        );
+        assert_eq!(
+            detect("RFB 003.008", "VNC Beach @ mini (macOS)"),
+            RemoteKind::BeachMac
+        );
+        assert_eq!(
+            detect("RFB 003.008", "VNC Beach @ pc (Windows)"),
+            RemoteKind::Other
+        );
+        assert_eq!(detect("RFB 003.008", "TigerVNC"), RemoteKind::Other);
+        assert!(RemoteKind::BeachMac.is_mac() && !RemoteKind::Other.is_mac());
+    }
 
     #[test]
     fn addresses() {

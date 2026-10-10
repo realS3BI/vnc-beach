@@ -1,0 +1,16 @@
+[package]
+name = "beach-mobile"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "C interface to the VNC Beach client, used by the iOS app"
+
+[lib]
+name = "beach_mobile"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+rfb = { version = "0.1.0", path = "../rfb" }
+
+[lints]
+workspace = true

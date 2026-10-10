@@ -1,15 +1,9 @@
-mod capture;
-mod clipboard;
-mod input;
-mod session;
-
-use std::net::TcpListener;
-use std::sync::Arc;
-
-use anyhow::{bail, Context};
+use anyhow::bail;
 use clap::Parser;
 
-/// vnc-beach server: shares this computer's screen over VNC (RFB).
+use beach_server::{Options, Server};
+
+/// VNC Beach server: shares this computer's screen over VNC (RFB).
 #[derive(Parser, Debug)]
 #[command(version)]
 struct Args {
@@ -33,7 +27,7 @@ struct Args {
     #[arg(long)]
     list_displays: bool,
     /// Maximum frames per second sent to viewers.
-    #[arg(long, default_value_t = 30)]
+    #[arg(long, default_value_t = 60)]
     fps: u32,
     /// Ignore keyboard and mouse input from viewers.
     #[arg(long)]
@@ -44,11 +38,8 @@ fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args = Args::parse();
 
-    #[cfg(windows)]
-    let _ = enigo::set_dpi_awareness();
-
     if args.list_displays {
-        for (i, d) in capture::displays()?.iter().enumerate() {
+        for (i, d) in beach_server::displays()?.iter().enumerate() {
             println!("{i}: {d}");
         }
         return Ok(());
@@ -67,60 +58,35 @@ fn main() -> anyhow::Result<()> {
             Some(p.clone())
         }
         (None, _) => {
-            let p = random_password();
+            let p = beach_server::random_password();
             println!("Password: {p}");
             Some(p)
         }
     };
 
-    let screen = capture::Screen::start(args.display, args.fps).context("starting screen capture")?;
-    let clipboard = clipboard::Clipboard::start();
-    let input = if args.view_only {
-        None
-    } else {
-        Some(input::Input::start(screen.geometry())?)
-    };
-
-    let listener = TcpListener::bind((args.bind.as_str(), args.port))
-        .with_context(|| format!("binding {}:{}", args.bind, args.port))?;
-    log::info!("listening on {}", listener.local_addr()?);
-
-    let ctx = Arc::new(session::Context {
-        screen,
-        clipboard,
-        input,
+    let _server = Server::start(Options {
+        bind: args.bind,
+        port: args.port,
         password,
+        display: args.display,
         fps: args.fps,
-        name: format!("vnc-beach @ {}", gethostname::gethostname().to_string_lossy()),
-    });
-    for stream in listener.incoming() {
-        let stream = match stream {
-            Ok(s) => s,
-            Err(e) => {
-                log::warn!("accept failed: {e}");
-                continue;
-            }
-        };
-        let ctx = ctx.clone();
-        std::thread::spawn(move || {
-            let peer = stream.peer_addr().map(|a| a.to_string()).unwrap_or_default();
-            log::info!("{peer}: connected");
-            match session::run(stream, &ctx) {
-                Ok(()) => log::info!("{peer}: disconnected"),
-                Err(e) => log::info!("{peer}: disconnected ({e:#})"),
-            }
-        });
-    }
-    Ok(())
+        view_only: args.view_only,
+        name: None,
+    })?;
+    serve_forever()
 }
 
-fn random_password() -> String {
-    const ALPHABET: &[u8] = b"abcdefghjkmnpqrstuvwxyz23456789";
-    let seed = std::collections::hash_map::RandomState::new();
-    (0..8u64)
-        .map(|i| {
-            use std::hash::BuildHasher;
-            ALPHABET[(seed.hash_one(i) % ALPHABET.len() as u64) as usize] as char
-        })
-        .collect()
+/// Keeps the process alive while the server threads work.
+#[cfg(target_os = "macos")]
+fn serve_forever() -> ! {
+    // The main queue has to run: the input thread reads the keyboard layout
+    // there (see `keymap`).
+    dispatch2::dispatch_main()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn serve_forever() -> ! {
+    loop {
+        std::thread::park();
+    }
 }

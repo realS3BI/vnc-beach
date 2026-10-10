@@ -153,6 +153,16 @@ fn fail(w: &mut impl Write, version: Version, reason: &str) -> Result<()> {
 /// Runs the client side of the handshake. Returns [`Error::PasswordRequired`]
 /// if the server wants VNC authentication and `password` is `None`.
 pub fn client_handshake<S: Read + Write>(s: &mut S, password: Option<&str>) -> Result<ServerInit> {
+    client_handshake_with_banner(s, password).map(|(init, _)| init)
+}
+
+/// Like [`client_handshake`], but also returns the server's version banner
+/// (e.g. `RFB 003.889` for macOS Screen Sharing), which tells a viewer what
+/// it is talking to.
+pub fn client_handshake_with_banner<S: Read + Write>(
+    s: &mut S,
+    password: Option<&str>,
+) -> Result<(ServerInit, String)> {
     let mut banner = [0; 12];
     s.read_exact(&mut banner)?;
     let version = Version::parse(&banner)?;
@@ -206,7 +216,8 @@ pub fn client_handshake<S: Read + Write>(s: &mut S, password: Option<&str>) -> R
 
     s.put_u8(1)?; // shared: don't kick other viewers
     s.flush()?;
-    ServerInit::read(s)
+    let init = ServerInit::read(s)?;
+    Ok((init, String::from_utf8_lossy(&banner).trim().to_string()))
 }
 
 fn read_reason(r: &mut impl Read) -> Result<String> {

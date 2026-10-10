@@ -47,7 +47,7 @@ impl Input {
                 Err(e) => {
                     let _ = ready_tx.send(Err(anyhow::anyhow!(
                         "input injection unavailable ({e}). On macOS, allow this app/terminal under \
-                         System Settings → Privacy & Security → Accessibility"
+                         System Settings > Privacy & Security > Accessibility"
                     )));
                     return;
                 }
@@ -153,7 +153,10 @@ impl State {
         };
         if self.shortcut_modifier_held() {
             // Ctrl/Cmd+key: press the physical key so apps see a shortcut.
-            let key = Key::Unicode(c.to_ascii_lowercase());
+            let Some(key) = shortcut_key(c.to_ascii_lowercase()) else {
+                log::debug!("no key types {c:?} in the current layout, dropping the shortcut");
+                return Ok(());
+            };
             self.keys.insert(sym, Some(key));
             self.enigo.key(key, Direction::Press)
         } else {
@@ -182,6 +185,20 @@ impl State {
         }
         self.buttons = 0;
     }
+}
+
+/// The key to press for `c` in a shortcut.
+#[cfg(target_os = "macos")]
+fn shortcut_key(c: char) -> Option<Key> {
+    // Not `Key::Unicode`: enigo looks that up with the Text Input Sources API
+    // on this thread, which macOS 26 crashes on. `Key::Other` is the raw
+    // keycode.
+    crate::keymap::keycode_for(c).map(|code| Key::Other(code.into()))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn shortcut_key(c: char) -> Option<Key> {
+    Some(Key::Unicode(c))
 }
 
 /// Non-character keys.

@@ -1,7 +1,7 @@
 //! Screen capture. Publishes the latest frame; sessions diff against what
 //! they last sent.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -29,6 +29,7 @@ pub struct Screen {
     latest: Mutex<Arc<Frame>>,
     geometry: Geometry,
     viewers: AtomicUsize,
+    stopped: AtomicBool,
 }
 
 impl Screen {
@@ -62,6 +63,7 @@ impl Screen {
             latest: Mutex::new(Arc::new(first)),
             geometry,
             viewers: AtomicUsize::new(0),
+            stopped: AtomicBool::new(false),
         });
         screen_tx.send(screen.clone())?;
         Ok(screen)
@@ -83,6 +85,11 @@ impl Screen {
         Watch(self.clone())
     }
 
+    /// Ends the capture thread.
+    pub fn stop(&self) {
+        self.stopped.store(true, Ordering::Release);
+    }
+
     fn publish(&self, frame: Frame) {
         *self.latest.lock().unwrap() = Arc::new(frame);
     }
@@ -90,7 +97,7 @@ impl Screen {
     fn capture_loop(&self, monitor: Monitor, fps: u32) {
         let interval = Duration::from_secs_f64(1.0 / fps as f64);
         let mut failures = 0;
-        loop {
+        while !self.stopped.load(Ordering::Acquire) {
             if self.viewers.load(Ordering::Acquire) == 0 {
                 std::thread::sleep(Duration::from_millis(100));
                 continue;
@@ -138,7 +145,7 @@ fn check_permission() {
     }
     log::warn!(
         "no Screen Recording permission: viewers will only see the wallpaper. Allow it for this \
-         app/terminal in System Settings → Privacy & Security → Screen & System Audio Recording, \
+         app/terminal in System Settings > Privacy & Security > Screen & System Audio Recording, \
          then restart the server"
     );
     unsafe { CGRequestScreenCaptureAccess() };

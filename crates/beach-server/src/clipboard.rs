@@ -1,12 +1,13 @@
 //! Server clipboard: polls for local changes and applies text from viewers.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub struct Clipboard {
     text: Mutex<String>,
     seq: AtomicU64,
+    stopped: AtomicBool,
 }
 
 impl Clipboard {
@@ -14,6 +15,7 @@ impl Clipboard {
         let cb = Arc::new(Clipboard {
             text: Mutex::new(String::new()),
             seq: AtomicU64::new(0),
+            stopped: AtomicBool::new(false),
         });
         let c = cb.clone();
         std::thread::Builder::new()
@@ -32,15 +34,21 @@ impl Clipboard {
         if let Ok(t) = board.get_text() {
             *self.text.lock().unwrap() = t;
         }
-        loop {
+        while !self.stopped.load(Ordering::Acquire) {
             std::thread::sleep(Duration::from_millis(500));
             let Ok(current) = board.get_text() else { continue };
             let mut text = self.text.lock().unwrap();
             if *text != current {
+                log::debug!("local clipboard changed: {} chars", current.chars().count());
                 *text = current;
                 self.seq.fetch_add(1, Ordering::Release);
             }
         }
+    }
+
+    /// Ends the polling thread.
+    pub fn stop(&self) {
+        self.stopped.store(true, Ordering::Release);
     }
 
     pub fn seq(&self) -> u64 {
@@ -58,7 +66,10 @@ impl Clipboard {
             return;
         }
         match arboard::Clipboard::new().and_then(|mut b| b.set_text(new.clone())) {
-            Ok(()) => *text = new,
+            Ok(()) => {
+                log::debug!("clipboard set from viewer: {} chars", new.chars().count());
+                *text = new;
+            }
             Err(e) => log::warn!("setting clipboard failed: {e}"),
         }
     }

@@ -1,0 +1,83 @@
+name: VNCBeach
+
+options:
+  createIntermediateGroups: true
+  developmentLanguage: de
+  deploymentTarget:
+    iOS: "18.0"
+  minimumXcodeGenVersion: 2.44.0
+
+settings:
+  base:
+    CLANG_ENABLE_MODULES: YES
+    SWIFT_VERSION: 6.0
+
+schemes:
+  VNCBeachCloud:
+    build:
+      targets:
+        VNCBeach: all
+    test:
+      config: Debug
+      targets:
+        - VNCBeachTests
+    archive:
+      config: Release
+
+targets:
+  VNCBeach:
+    type: application
+    platform: iOS
+    sources:
+      - path: VNCBeach
+    configFiles:
+      Debug: Config/Base.xcconfig
+      Release: Config/Base.xcconfig
+    preBuildScripts:
+      - name: Build Rust library (beach-mobile)
+        script: |
+          exec "$SRCROOT/../../tools/build-ios.sh" "$BEACH_RUST_TARGET"
+        shell: /bin/sh
+        basedOnDependencyAnalysis: false
+    settings:
+      base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        INFOPLIST_FILE: VNCBeach/Info.plist
+        PRODUCT_NAME: VNC Beach
+        PRODUCT_MODULE_NAME: VNCBeach
+        SUPPORTS_MACCATALYST: NO
+        SWIFT_APPROACHABLE_CONCURRENCY: YES
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        # The Rust static library and its C header (crates/beach-mobile).
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/../../crates/beach-mobile/include"
+        LIBRARY_SEARCH_PATHS: "$(SRCROOT)/../../target/$(BEACH_RUST_TARGET)/release"
+        OTHER_LDFLAGS: "-lbeach_mobile"
+        "BEACH_RUST_TARGET[sdk=iphoneos*]": aarch64-apple-ios
+        "BEACH_RUST_TARGET[sdk=iphonesimulator*]": aarch64-apple-ios-sim
+        "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
+    scheme:
+      testTargets:
+        - VNCBeachTests
+
+  VNCBeachTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: VNCBeachTests
+    dependencies:
+      - target: VNCBeach
+    configFiles:
+      Debug: Config/Base.xcconfig
+      Release: Config/Base.xcconfig
+    settings:
+      base:
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: at.schlossers.vncbeach.tests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/VNC Beach.app/VNC Beach"
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/../../crates/beach-mobile/include"
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+        "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64

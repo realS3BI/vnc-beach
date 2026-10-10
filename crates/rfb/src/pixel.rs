@@ -33,6 +33,34 @@ impl PixelFormat {
         blue_shift: 0,
     };
 
+    /// 16bpp RGB565, little endian: half the bandwidth of `BGRX` with raw.
+    pub const RGB565: PixelFormat = PixelFormat {
+        bits_per_pixel: 16,
+        depth: 16,
+        big_endian: false,
+        true_color: true,
+        red_max: 31,
+        green_max: 63,
+        blue_max: 31,
+        red_shift: 11,
+        green_shift: 5,
+        blue_shift: 0,
+    };
+
+    /// 8bpp BGR233 (the classic "low colour" VNC format, 256 colours).
+    pub const BGR233: PixelFormat = PixelFormat {
+        bits_per_pixel: 8,
+        depth: 8,
+        big_endian: false,
+        true_color: true,
+        red_max: 7,
+        green_max: 7,
+        blue_max: 3,
+        red_shift: 0,
+        green_shift: 3,
+        blue_shift: 6,
+    };
+
     pub fn read(r: &mut impl Read) -> std::io::Result<Self> {
         let pf = PixelFormat {
             bits_per_pixel: r.u8()?,
@@ -234,6 +262,19 @@ mod tests {
         pf.put_cpixel(&mut out, p);
         assert_eq!(out, [30, 20, 10]);
         assert_eq!(pf.get_cpixel(&out), p);
+    }
+
+    #[test]
+    fn reduced_formats_are_supported_and_roundtrip() {
+        for pf in [PixelFormat::RGB565, PixelFormat::BGR233] {
+            assert!(pf.is_supported(), "{pf:?}");
+            let mut out = Vec::new();
+            pf.encode_rgba(&[255, 255, 255, 255, 0, 0, 0, 255], 8, 2, 1, &mut out);
+            assert_eq!(out.len(), 2 * pf.bytes_per_pixel());
+            let bpp = pf.bytes_per_pixel();
+            assert_eq!(pf.unpack(pf.get_pixel(&out[..bpp])), [255, 255, 255]);
+            assert_eq!(pf.unpack(pf.get_pixel(&out[bpp..])), [0, 0, 0]);
+        }
     }
 
     #[test]

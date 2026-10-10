@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VNC Beach – Bildschirm teilen, ganz entspannt</title>
+<meta name="description" content="VNC Beach ist ein kostenloser VNC-Server und -Viewer für macOS und Windows. Standard-VNC (RFB 3.8), Favoriten, Einstellungen pro Verbindung, Server im Hintergrund.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta property="og:title" content="VNC Beach">
+<meta property="og:description" content="Kostenloser VNC-Server und -Viewer für macOS und Windows.">
+<meta property="og:image" content="logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=Caveat:wght@600&family=Nunito+Sans:ital,opsz,wght@0,6..12,400;0,6..12,600;0,6..12,700;1,6..12,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --sky-top: #8EDDFB;
+    --sky: #3FB4E6;
+    --sea: #1E97CC;
+    --deep: #0E5F8F;
+    --deeper: #0A4568;
+    --sand: #F4DCA7;
+    --sand-dark: #E3C184;
+    --cream: #FFF8EE;
+    --red: #F0484B;
+    --ink: #17364A;
+    --sun: #FFD35C;
+    --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", sans-serif;
+    --body: "Nunito Sans", "Segoe UI", system-ui, sans-serif;
+    --hand: "Caveat", "Bradley Hand", cursive;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.55;
+    color: var(--ink);
+    background: var(--sky);
+  }
+  a { color: inherit; }
+  :focus-visible { outline: 3px solid var(--red); outline-offset: 3px; }
+  .wrap { width: min(1120px, 100% - 40px); margin: 0 auto; }
+  h1, h2, h3 { font-family: var(--display); line-height: 1.05; margin: 0; }
+  h2 { font-size: clamp(32px, 4.5vw, 48px); font-weight: 800; letter-spacing: -0.02em; }
+  h3 { font-size: 22px; font-weight: 800; }
+  p { margin: 0 0 1em; }
+  code { font-family: var(--mono); font-size: 0.92em; }
+  pre {
+    font-family: var(--mono);
+    font-size: 15px;
+    line-height: 1.5;
+    background: var(--deeper);
+    color: #DDF1FB;
+    padding: 16px 20px;
+    border-radius: 12px;
+    overflow-x: auto;
+    margin: 0 0 1em;
+  }
+
+  /* ---------- Himmel: Hero ---------- */
+  .sky {
+    background: linear-gradient(180deg, var(--sky-top) 0%, var(--sky) 70%, var(--sea) 100%);
+    color: var(--ink);
+    position: relative;
+    overflow: hidden;
+  }
+  .sun {
+    position: absolute;
+    right: clamp(-120px, 8vw, 120px);
+    top: 70px;
+    width: 280px; height: 280px;
+    border-radius: 50%;
+    background: var(--sun);
+    box-shadow: 0 0 0 60px rgba(255, 211, 92, 0.25), 0 0 0 130px rgba(255, 211, 92, 0.12);
+    pointer-events: none;
+  }
+  nav {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 22px 0;
+    position: relative;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; font-family: var(--display); font-weight: 800; font-size: 22px; letter-spacing: -0.01em; }
+  .brand img { width: 40px; height: 40px; border-radius: 10px; box-shadow: 0 4px 14px rgba(14, 95, 143, 0.25); }
+  .brand .dash { color: var(--red); }
+  .brand span { display: inline; }
+  nav a.gh { font-weight: 700; text-decoration: none; padding: 10px 16px; border-radius: 999px; background: rgba(255,255,255,0.45); }
+  nav a.gh:hover { background: rgba(255,255,255,0.75); }
+
+  .hero {
+    display: grid;
+    grid-template-columns: 1.05fr 1fr;
+    gap: 48px;
+    align-items: center;
+    padding: 40px 0 120px;
+    position: relative;
+  }
+  .eyebrow {
+    display: inline-block;
+    font-size: 14px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--deep);
+    background: rgba(255,255,255,0.55);
+    padding: 6px 12px; border-radius: 999px;
+    margin-bottom: 22px;
+  }
+  .hero h1 {
+    font-size: clamp(44px, 6.6vw, 84px);
+    font-weight: 800;
+    letter-spacing: -0.035em;
+    color: var(--deeper);
+    margin-bottom: 20px;
+  }
+  .hero h1 em { font-style: normal; color: var(--red); }
+  .lead { font-size: clamp(18px, 1.6vw, 21px); max-width: 32em; color: var(--ink); }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+  .btn {
+    display: inline-block;
+    font-family: var(--display); font-weight: 800; font-size: 18px;
+    padding: 14px 22px; border-radius: 14px;
+    text-decoration: none;
+    transition: transform .15s ease;
+  }
+  .btn:hover { transform: translateY(-2px); }
+  .btn.primary { background: var(--red); color: #fff; box-shadow: 0 10px 24px rgba(240, 72, 75, 0.35); }
+  .btn.ghost { background: rgba(255,255,255,0.6); color: var(--deeper); }
+  .fine { font-size: 14px; color: var(--deep); margin-top: 14px; }
+
+  /* ---------- Postkarte ---------- */
+  .postcard {
+    background: var(--cream);
+    border-radius: 6px;
+    box-shadow: 0 30px 60px rgba(10, 69, 104, 0.35), 0 2px 0 rgba(255,255,255,0.6) inset;
+    padding: 16px;
+    transform: rotate(-2.5deg);
+    position: relative;
+  }
+  .postcard:hover { transform: rotate(-1.5deg); }
+  @media (prefers-reduced-motion: no-preference) { .postcard { transition: transform .4s ease; } }
+  .postcard .photo {
+    display: block; width: 100%; height: auto;
+    border-radius: 3px;
+    border: 1px solid rgba(23, 54, 74, 0.15);
+  }
+  .postcard .back {
+    display: grid; grid-template-columns: 1.3fr 1fr; gap: 14px;
+    margin-top: 14px; padding-top: 12px;
+    border-top: 1px dashed rgba(23, 54, 74, 0.25);
+    min-height: 110px;
+  }
+  .postcard .note {
+    font-family: var(--hand); font-size: 24px; line-height: 1.15; color: var(--deeper);
+    transform: rotate(-1deg);
+    padding-right: 8px;
+  }
+  .postcard .address { position: relative; border-left: 1px solid rgba(23, 54, 74, 0.25); padding-left: 14px; }
+  .postcard .lines span { display: block; height: 1px; background: rgba(23, 54, 74, 0.3); margin: 22px 0 0; }
+  .stamp {
+    position: absolute; top: 0; right: 0;
+    width: 54px; height: 54px; padding: 4px;
+    background: #fff;
+    border: 1px solid rgba(23, 54, 74, 0.2);
+    /* Zackenrand */
+    -webkit-mask: radial-gradient(circle at 4px 4px, transparent 2.5px, #000 2.6px) -4px -4px / 8px 8px;
+            mask: radial-gradient(circle at 4px 4px, transparent 2.5px, #000 2.6px) -4px -4px / 8px 8px;
+  }
+  .stamp img { width: 100%; height: 100%; border-radius: 6px; display: block; }
+  .postmark {
+    position: absolute; top: -8px; right: 44px;
+    width: 86px; height: 86px;
+    color: var(--deep); opacity: 0.75;
+    transform: rotate(-12deg);
+    pointer-events: none;
+  }
+
+  /* ---------- Welle ---------- */
+  .wave { position: relative; height: 90px; margin-top: -90px; overflow: hidden; }
+  .wave svg { position: absolute; bottom: 0; left: 0; width: 200%; height: 100%; }
+  @media (prefers-reduced-motion: no-preference) {
+    .wave svg { animation: drift 14s linear infinite; }
+  }
+  @keyframes drift { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+  /* ---------- Meer: Funktionen ---------- */
+  .sea { background: linear-gradient(180deg, var(--sea) 0%, var(--deep) 60%, var(--deeper) 100%); color: #EAF7FD; padding: 72px 0 96px; }
+  .sea h2 { color: #fff; }
+  .sea .intro { max-width: 40em; font-size: 19px; color: #CFEAF7; margin: 14px 0 44px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+  .card {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 18px;
+    padding: 26px 26px 18px;
+  }
+  .card h3 { color: #fff; margin-bottom: 6px; }
+  .card .who { font-size: 14px; color: #A9D9F0; margin-bottom: 14px; }
+  .card ul { list-style: none; padding: 0; margin: 0; }
+  .card li { padding: 9px 0 9px 28px; position: relative; border-top: 1px solid rgba(255,255,255,0.12); }
+  .card li::before {
+    content: ""; position: absolute; left: 2px; top: 17px;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--sun);
+  }
+  .card li strong { color: #fff; }
+  .interop {
+    margin-top: 28px;
+    display: grid; grid-template-columns: auto 1fr; gap: 22px; align-items: center;
+    background: rgba(10, 69, 104, 0.5);
+    border-radius: 18px; padding: 22px 26px;
+  }
+  .interop .badge {
+    font-family: var(--display); font-weight: 800; font-size: 26px; letter-spacing: -0.02em;
+    color: var(--deeper); background: var(--sun);
+    padding: 12px 16px; border-radius: 12px; white-space: nowrap;
+  }
+  .interop p { margin: 0; color: #DDF1FB; }
+
+  /* ---------- Sand: Loslegen ---------- */
+  .shore { height: 70px; background: var(--deeper); position: relative; overflow: hidden; }
+  .shore svg { position: absolute; bottom: -1px; left: 0; width: 100%; height: 100%; }
+  .sand { background: linear-gradient(180deg, var(--sand) 0%, #F7E6BE 100%); padding: 64px 0 40px; }
+  .sand h2 { color: var(--deeper); margin-bottom: 10px; }
+  .sand .intro { max-width: 40em; margin-bottom: 36px; }
+  .steps { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+  .os { background: var(--cream); border-radius: 18px; padding: 26px; box-shadow: 0 10px 30px rgba(138, 90, 54, 0.12); }
+  .os h3 { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; color: var(--deeper); }
+  .os ol { margin: 0; padding-left: 22px; }
+  .os li { margin-bottom: 10px; }
+  .os li::marker { font-family: var(--display); font-weight: 800; color: var(--red); }
+  .note {
+    margin-top: 28px;
+    background: var(--cream);
+    border-left: 6px solid var(--red);
+    border-radius: 12px;
+    padding: 18px 22px;
+  }
+  .note strong { font-family: var(--display); }
+  .build { margin-top: 28px; }
+  footer {
+    padding: 36px 0 30px;
+    font-size: 15px; color: #6E4F2E;
+    display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center; justify-content: space-between;
+    border-top: 1px solid var(--sand-dark);
+    margin-top: 36px;
+  }
+  footer .umbrella { font-size: 22px; }
+
+  @media (max-width: 860px) {
+    body { font-size: 16px; }
+    .hero { grid-template-columns: 1fr; padding-bottom: 90px; gap: 36px; }
+    .postcard { transform: rotate(-1deg); }
+    .sun { width: 180px; height: 180px; top: 20px; }
+    .cols, .steps { grid-template-columns: 1fr; }
+    .interop { grid-template-columns: 1fr; }
+    .postcard .back { grid-template-columns: 1fr; }
+    .postcard .address { border-left: 0; padding-left: 0; min-height: 90px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="sky">
+  <div class="sun" aria-hidden="true"></div>
+  <div class="wrap">
+    <nav>
+      <a class="brand" href="#"><img src="favicon.svg" alt="" width="40" height="40"><span>VNC <span class="dash">Beach</span></span></a>
+      <a class="gh" href="https://github.com/realS3BI/vnc-beach">GitHub ↗</a>
+    </nav>
+    <div class="hero">
+      <div>
+        <span class="eyebrow">Kostenlos · Open Source · macOS &amp; Windows</span>
+        <h1>Bildschirm teilen, ganz <em>entspannt.</em></h1>
+        <p class="lead">VNC Beach ist ein VNC-Server und -Viewer für macOS und Windows. Er spricht das ganz normale VNC-Protokoll, kostet nichts und wird nichts kosten.</p>
+        <div class="cta">
+          <a class="btn primary" href="https://github.com/realS3BI/vnc-beach/releases">Herunterladen</a>
+          <a class="btn ghost" href="#loslegen">So geht's</a>
+        </div>
+        <p class="fine">Builds für Windows und macOS liegen bei den GitHub-Releases. Wer mag, baut selbst mit <code>cargo</code>.</p>
+      </div>
+      <figure class="postcard" aria-label="Postkarte mit einem Screenshot von VNC Beach">
+        <img class="photo" src="screenshot-viewer.png" alt="Der VNC-Beach-Viewer: links die Favoritenliste und der Status des eigenen Servers, rechts das Formular für eine Verbindung." width="1100" height="700">
+        <div class="back">
+          <div class="note">Grüße vom anderen Rechner!<br>Bin in 5 Minuten am PC daheim – ohne aufzustehen.</div>
+          <div class="address">
+            <div class="stamp"><img src="favicon.svg" alt=""></div>
+            <svg class="postmark" viewBox="0 0 100 100" aria-hidden="true">
+              <defs><path id="ring" d="M50,50 m-36,0 a36,36 0 1,1 72,0 a36,36 0 1,1 -72,0"/></defs>
+              <circle cx="50" cy="50" r="44" fill="none" stroke="currentColor" stroke-width="2"/>
+              <circle cx="50" cy="50" r="28" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <text font-family="Nunito Sans, sans-serif" font-size="10.5" font-weight="700" letter-spacing="1.5" fill="currentColor">
+                <textPath href="#ring">RFB 3.8 · PORT 5900 · VNC-BEACH ·</textPath>
+              </text>
+            </svg>
+            <div class="lines"><span></span><span></span><span></span></div>
+          </div>
+        </div>
+      </figure>
+    </div>
+  </div>
+</header>
+
+<div class="wave" aria-hidden="true">
+  <svg viewBox="0 0 2880 90" preserveAspectRatio="none">
+    <path fill="#1E97CC" d="M0,50 C240,20 480,80 720,50 S1200,20 1440,50 S1920,80 2160,50 S2640,20 2880,50 L2880,90 L0,90 Z"/>
+    <path fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="6" stroke-linecap="round" d="M0,50 C240,20 480,80 720,50 S1200,20 1440,50 S1920,80 2160,50 S2640,20 2880,50"/>
+  </svg>
+</div>
+
+<section class="sea" id="funktionen">
+  <div class="wrap">
+    <h2>Was drin ist</h2>
+    <p class="intro">Ein Viewer und ein Server für beide Systeme. Auf dem Mac geht auch die eingebaute Bildschirmfreigabe, nur die Zwischenablage gibt es dann nicht.</p>
+    <div class="cols">
+      <div class="card">
+        <h3>Viewer</h3>
+        <div class="who">macOS und Windows</div>
+        <ul>
+          <li><strong>Favoriten</strong> mit Name, Adresse und Passwort. Doppelklick verbindet.</li>
+          <li><strong>Einstellungen pro Verbindung:</strong> Farbtiefe bis 256 Farben für langsame Leitungen, Nur ansehen, Originalgröße oder ans Fenster angepasst, Vollbild beim Verbinden. Alles mit Standardwerten, die jeder Favorit einzeln überschreiben kann.</li>
+          <li><strong>ZRLE-Kodierung</strong> und Auflösungswechsel mitten in der Sitzung.</li>
+          <li><strong>Zwischenablage</strong> in beide Richtungen, ganz ohne Zutun: was du lokal kopierst, kannst du drüben einfügen und umgekehrt.</li>
+          <li><strong>Strg wird Cmd</strong> und Cmd wird Strg, sobald auf der anderen Seite ein Mac bzw. ein Windows-PC steht. Strg+Alt+Entf gibt es per Knopf.</li>
+          <li>Das Fenster passt sich dem entfernten Bildschirm an.</li>
+          <li><strong>Aktualisiert sich selbst:</strong> Eine neue Version meldet sich beim Start und installiert sich per Klick.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Server</h3>
+        <div class="who">Windows und macOS, im selben Programm</div>
+        <ul>
+          <li><strong>Läuft im Hintergrund</strong> mit einem Symbol im Infobereich bzw. in der Menüleiste. Ein Klick darauf öffnet den Viewer.</li>
+          <li><strong>Startet beim Anmelden,</strong> wenn man das möchte.</li>
+          <li><strong>Status im Viewer:</strong> „Dieser Computer“ zeigt, ob der Server online ist, auf welchem Port und wer gerade zuschaut.</li>
+          <li><strong>Einstellungen:</strong> Passwort, Port, Bildschirm, Bilder pro Sekunde, Nur ansehen.</li>
+          <li>Gibt es auch als Kommandozeilenprogramm, für Mac und Windows.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="interop">
+      <div class="badge">RFB 3.8</div>
+      <p>VNC Beach spricht Standard-VNC nach RFC 6143, ohne eigene Protokollerweiterungen. Darum verträgt es sich mit TigerVNC, RealVNC, Remmina, der Bildschirmfreigabe von macOS und allem anderen, das VNC kann – in beide Richtungen.</p>
+    </div>
+  </div>
+</section>
+
+<div class="shore" aria-hidden="true">
+  <svg viewBox="0 0 1440 70" preserveAspectRatio="none">
+    <path fill="#F4DCA7" d="M0,45 C200,20 400,70 720,45 S1240,20 1440,45 L1440,70 L0,70 Z"/>
+    <path fill="none" stroke="#E3C184" stroke-width="5" d="M0,45 C200,20 400,70 720,45 S1240,20 1440,45"/>
+  </svg>
+</div>
+
+<section class="sand" id="loslegen">
+  <div class="wrap">
+    <h2>Loslegen</h2>
+    <p class="intro">Eine Datei, keine Installation. Beim ersten Start zeigt der Viewer links die Favoriten und auf Windows den Stand des eigenen Servers.</p>
+    <div class="steps">
+      <div class="os">
+        <h3>Auf Windows</h3>
+        <ol>
+          <li><code>vnc-beach.exe</code> aus dem Release laden und starten.</li>
+          <li>Unter „Dieser Computer“ auf „Einstellungen …“ klicken: Passwort merken oder neu erzeugen, Port und Bildschirm wählen, „Hintergrunddienst beim Anmelden starten“ anhaken.</li>
+          <li>Ab jetzt läuft der Server im Infobereich. Von einem anderen Rechner aus verbindet man sich mit dem PC-Namen oder seiner Adresse.</li>
+        </ol>
+      </div>
+      <div class="os">
+        <h3>Auf dem Mac</h3>
+        <ol>
+          <li>Den Viewer laden und starten, Favoriten anlegen, verbinden.</li>
+          <li>Soll der Mac selbst erreichbar sein: entweder unter „Dieser Computer“ den VNC-Beach-Server einschalten (mit Zwischenablage), oder die Bildschirmfreigabe von macOS nutzen (Systemeinstellungen → Allgemein → Teilen).</li>
+          <li>Für den Kommandozeilen-Server braucht das Terminal Bildschirmaufnahme und Bedienungshilfen in den Datenschutz-Einstellungen.</li>
+        </ol>
+      </div>
+    </div>
+    <div class="note">
+      <strong>Nur im eigenen Netz.</strong> Klassisches VNC verschlüsselt nichts, und das VNC-Passwort ist nach heutigen Maßstäben schwach. Den Port nie direkt ins Internet freigeben, sondern über ein VPN wie Tailscale oder WireGuard verbinden.
+    </div>
+    <div class="build">
+      <h3>Selbst bauen</h3>
+      <p>Rust installieren, dann:</p>
+<pre>git clone https://github.com/realS3BI/vnc-beach
+cd vnc-beach
+cargo build --release --workspace
+# Viewer: target/release/beach-viewer
+# Server: target/release/beach-server --password geheim</pre>
+    </div>
+    <footer>
+      <span><span class="umbrella" aria-hidden="true">⛱</span> VNC Beach · MIT-Lizenz</span>
+      <span><a href="https://github.com/realS3BI/vnc-beach">Quellcode auf GitHub</a> · gebaut von Sebastian Schlosser</span>
+    </footer>
+  </div>
+</section>
+
+</body>
+</html>
