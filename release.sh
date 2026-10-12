@@ -11,6 +11,8 @@
 #      ~/.config/vnc-beach/appstoreconnect.env).
 #
 # Usage:
+#   ./release.sh                       show the current version and prompt
+#                                      for the version to release
 #   ./release.sh 0.2.0                 full release
 #   ./release.sh 0.2.0 --dry-run       build everything, publish nothing,
 #                                      restore the version files afterwards
@@ -26,9 +28,7 @@ cd "$(dirname "$0")"
 die() { print -u2 "release: $*"; exit 1; }
 step() { print "\n== $*"; }
 
-[ $# -ge 1 ] || die "usage: ./release.sh X.Y.Z [--dry-run] [--skip-macos] [--skip-windows] [--skip-ios]"
-VERSION=$1
-shift
+VERSION=
 DRY=0 SKIP_MAC=0 SKIP_WIN=0 SKIP_IOS=0
 for arg in "$@"; do
   case $arg in
@@ -36,14 +36,25 @@ for arg in "$@"; do
     --skip-macos) SKIP_MAC=1 ;;
     --skip-windows) SKIP_WIN=1 ;;
     --skip-ios) SKIP_IOS=1 ;;
-    *) die "unknown option $arg" ;;
+    -*) die "unknown option $arg" ;;
+    *)
+      [ -z "$VERSION" ] || die "unexpected argument $arg"
+      VERSION=$arg
+      ;;
   esac
 done
 
-[[ $VERSION =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]] || die "version must look like 1.2.3, got '$VERSION'"
-TAG="v$VERSION"
 CURRENT=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
 [ -n "$CURRENT" ] || die "no version in [workspace.package] of Cargo.toml"
+print "Current VNC Beach version: $CURRENT"
+
+if [ -z "$VERSION" ]; then
+  print -n "Version to release (X.Y.Z): "
+  read -r VERSION || die "no version entered"
+fi
+
+[[ $VERSION =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]] || die "version must look like 1.2.3, got '$VERSION'"
+TAG="v$VERSION"
 
 # Numeric comparison of X.Y.Z. The current version itself is fine as long as
 # it hasn't been released (checked with the tag below).
