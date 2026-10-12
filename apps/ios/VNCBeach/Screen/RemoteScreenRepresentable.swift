@@ -8,6 +8,12 @@ final class ScreenController {
     var inputMode: InputMode = AppSettings.inputMode
     var viewOnly = false
     var keyboardVisible = false
+    /// Shrink the image above the software keyboard instead of covering it.
+    var keyboardShrinks = AppSettings.keyboardShrinks {
+        didSet { UserDefaults.standard.set(keyboardShrinks, forKey: AppSettings.keyboardShrinksKey) }
+    }
+    /// The floating pad with arrow keys and a scroll strip.
+    var scrollPadVisible = false
     var zoom: CGFloat = 1
     weak var view: RemoteScreenView?
 
@@ -22,6 +28,11 @@ final class ScreenController {
 
     func type(_ keysym: UInt32) {
         view?.type(keysym: keysym)
+    }
+
+    /// Scrolls at the pointer; positive y is "natural" (content moves down).
+    func scroll(by delta: CGPoint) {
+        view?.scroll(by: delta)
     }
 
     func sendControlAltDelete() {
@@ -56,10 +67,12 @@ struct RemoteScreenRepresentable: UIViewRepresentable {
         view.swapCommandControl = swapCommandControl
         view.remote = remote
         view.touchpadSpeed = AppSettings.touchpadSpeed
+        view.shrinkForKeyboard = controller.keyboardShrinks
         if view.keyboardVisible != controller.keyboardVisible {
             view.setKeyboardVisible(controller.keyboardVisible)
         }
         _ = session.size
+        _ = session.crop
         view.remoteSizeChanged()
     }
 }

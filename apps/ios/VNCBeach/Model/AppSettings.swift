@@ -59,6 +59,7 @@ enum AppSettings {
     static let shortcutMappingKey = "shortcutMapping"
     static let clipboardSyncKey = "clipboardSync"
     static let touchpadSpeedKey = "touchpadSpeed"
+    static let keyboardShrinksKey = "keyboardShrinks"
 
     static var colorDepth: ColorDepth {
         ColorDepth(rawValue: UserDefaults.standard.integer(forKey: colorDepthKey)) ?? .full
@@ -75,5 +76,10 @@ enum AppSettings {
     static var touchpadSpeed: Double {
         let v = UserDefaults.standard.double(forKey: touchpadSpeedKey)
         return v == 0 ? 1.0 : v
+    }
+    /// Shrink the remote image so the software keyboard doesn't cover it
+    /// (instead of overlaying it).
+    static var keyboardShrinks: Bool {
+        UserDefaults.standard.object(forKey: keyboardShrinksKey) as? Bool ?? false
     }
 }

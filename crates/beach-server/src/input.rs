@@ -4,19 +4,20 @@
 
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Sender};
+use std::sync::Arc;
 
 use enigo::{Axis, Button, Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings};
 use rfb::keysym;
 
-use crate::capture::Geometry;
+use crate::capture::Layout;
 
 pub enum Event {
     Pointer {
         buttons: u8,
         x: u16,
         y: u16,
-        fb_width: usize,
-        fb_height: usize,
+        /// The arrangement the viewer's coordinates refer to.
+        layout: Arc<Layout>,
     },
     Key {
         down: bool,
@@ -31,7 +32,7 @@ pub struct Input {
 }
 
 impl Input {
-    pub fn start(geometry: Geometry) -> anyhow::Result<Input> {
+    pub fn start() -> anyhow::Result<Input> {
         let (tx, rx) = channel();
         let (ready_tx, ready_rx) = channel();
         std::thread::Builder::new().name("input".into()).spawn(move || {
@@ -54,7 +55,6 @@ impl Input {
             };
             let mut state = State {
                 enigo,
-                geometry,
                 buttons: 0,
                 keys: HashMap::new(),
             };
@@ -73,7 +73,6 @@ impl Input {
 
 struct State {
     enigo: Enigo,
-    geometry: Geometry,
     buttons: u8,
     /// Keysyms currently down, with the key we pressed for them (`None` if the
     /// press was typed as text and needs no release).
@@ -87,9 +86,8 @@ impl State {
                 buttons,
                 x,
                 y,
-                fb_width,
-                fb_height,
-            } => self.pointer(buttons, x, y, fb_width, fb_height),
+                layout,
+            } => self.pointer(buttons, x, y, &layout),
             Event::Key { down, keysym } => self.key(down, keysym),
             Event::ReleaseAll => {
                 self.release_all();
@@ -101,11 +99,10 @@ impl State {
         }
     }
 
-    fn pointer(&mut self, buttons: u8, x: u16, y: u16, fb_w: usize, fb_h: usize) -> enigo::InputResult<()> {
-        // Framebuffer pixels → desktop coordinates (handles Retina/HiDPI scaling).
-        let g = self.geometry;
-        let dx = g.x + (x as f64 * g.width as f64 / fb_w.max(1) as f64) as i32;
-        let dy = g.y + (y as f64 * g.height as f64 / fb_h.max(1) as f64) as i32;
+    fn pointer(&mut self, buttons: u8, x: u16, y: u16, layout: &Layout) -> enigo::InputResult<()> {
+        // Framebuffer pixels → desktop coordinates (handles Retina/HiDPI
+        // scaling and the display arrangement).
+        let (dx, dy) = layout.desktop_point(x as f64, y as f64);
         self.enigo.move_mouse(dx, dy, Coordinate::Abs)?;
 
         let changed = buttons ^ self.buttons;

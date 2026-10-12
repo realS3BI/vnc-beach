@@ -14,6 +14,8 @@ final class ScreenRenderer: NSObject, MTKViewDelegate {
 
     /// Where the remote image sits in the view, in points.
     var imageRect = CGRect.zero
+    /// The part of the texture drawn into `imageRect`, as fractions 0…1.
+    var uvRect = CGRect(x: 0, y: 0, width: 1, height: 1)
     var contentScale: CGFloat = 1
     weak var session: RemoteSession?
 
@@ -106,14 +108,18 @@ final class ScreenRenderer: NSObject, MTKViewDelegate {
             }
             let (x0, y0) = ndc(imageRect.minX, imageRect.minY)
             let (x1, y1) = ndc(imageRect.maxX, imageRect.maxY)
+            let (u0, v0, u1, v1) = (
+                Float(uvRect.minX), Float(uvRect.minY), Float(uvRect.maxX), Float(uvRect.maxY)
+            )
             var vertices: [Float] = [
-                x0, y0, 0, 0,
-                x1, y0, 1, 0,
-                x0, y1, 0, 1,
-                x1, y1, 1, 1,
+                x0, y0, u0, v0,
+                x1, y0, u1, v0,
+                x0, y1, u0, v1,
+                x1, y1, u1, v1,
             ]
             // One remote pixel covers at least two device pixels: keep edges crisp.
-            let pixelsPerRemotePixel = imageRect.width * s / CGFloat(texture.width)
+            let shownPixels = max(CGFloat(texture.width) * uvRect.width, 1)
+            let pixelsPerRemotePixel = imageRect.width * s / shownPixels
             encoder.setRenderPipelineState(pipeline)
             encoder.setVertexBytes(&vertices, length: vertices.count * MemoryLayout<Float>.size, index: 0)
             encoder.setFragmentTexture(texture, index: 0)

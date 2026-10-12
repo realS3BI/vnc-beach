@@ -3,17 +3,23 @@
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, TryRecvError};
 
-use egui::{Align, Color32, Event, Key, Layout, Modifiers, PointerButton, Pos2, Rect, RichText, Vec2};
+use egui::load::SizedTexture;
+use egui::{
+    Align, Align2, Color32, CornerRadius, CursorIcon, Event, FontId, Key, Layout, Margin, Modifiers,
+    PointerButton, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Vec2,
+};
 use rfb::keysym;
 use rfb::messages::ClientMessage;
 
-use crate::client::{parse_address, Connection, Notice, RemoteKind};
+use crate::client::{parse_address, Connection, Notice, Region, RemoteKind, Screen};
 use crate::clipboard::Clipboard;
 use crate::config::{self, Config};
+use crate::icon;
 use crate::keys;
 use crate::server_panel::ServerPanel;
 use crate::servers::{Directory, Server};
 use crate::settings::{Colors, Overrides, Scaling, Settings, Shortcuts};
+use crate::theme::{self, Kind, Palette};
 use crate::update::{self, Release, Version};
 
 pub struct App {
@@ -31,6 +37,14 @@ pub struct App {
     update: Update,
     error: Option<String>,
     state: State,
+    /// The app icon, for the sidebar header.
+    logo: egui::TextureHandle,
+    /// Show the form's password in plain text.
+    show_password: bool,
+    /// The per-connection settings are unfolded.
+    settings_open: bool,
+    /// Search text over the favorites (only shown for longer lists).
+    filter: String,
 }
 
 /// Where the update check stands.
@@ -80,9 +94,20 @@ impl App {
     pub fn new(cc: &eframe::CreationContext) -> Self {
         // Cmd/Ctrl +/- must reach the remote machine instead of zooming our UI.
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        theme::apply(&cc.egui_ctx);
+        let icon = icon::window();
+        let logo = cc.egui_ctx.load_texture(
+            "logo",
+            egui::ColorImage::from_rgba_unmultiplied([icon.width as usize, icon.height as usize], &icon.rgba),
+            egui::TextureOptions::LINEAR,
+        );
         let directory = Directory::load();
         update::clean_up();
         App {
+            logo,
+            show_password: false,
+            settings_open: false,
+            filter: String::new(),
             update: Update::check(&cc.egui_ctx, false),
             directory,
             config: config::load(),
@@ -102,6 +127,7 @@ impl App {
             self.form = server.clone();
             self.editing = Some(index);
             self.confirm_delete = false;
+            self.settings_open = !server.settings.is_empty();
             self.error = None;
         }
     }
@@ -110,6 +136,7 @@ impl App {
         self.form = Server::default();
         self.editing = None;
         self.confirm_delete = false;
+        self.settings_open = false;
         self.error = None;
     }
 
@@ -183,49 +210,66 @@ impl App {
             _ => conn.name.clone(),
         }
     }
+
     fn connect_form(&mut self, root: &mut egui::Ui) {
         let ctx = root.ctx().clone();
+        let p = Palette::of(root);
         let mut connect = false;
         egui::Panel::left("favorites")
-            .default_size(320.0)
-            .min_size(220.0)
-            .max_size(480.0)
+            .default_size(330.0)
+            .min_size(250.0)
+            .max_size(500.0)
             .resizable(true)
+            .frame(
+                egui::Frame::new()
+                    .fill(p.sidebar)
+                    .inner_margin(Margin::symmetric(14, 14)),
+            )
             .show(root, |ui| {
-                egui::Panel::bottom("this-computer").show(ui, |ui| {
-                    if let Some(panel) = &mut self.server {
-                        panel.show(ui, &self.config);
-                        ui.separator();
-                    }
-                    self.version_row(ui, &ctx);
-                    ui.add_space(4.0);
-                });
+                egui::Panel::bottom("this-computer")
+                    .frame(egui::Frame::NONE)
+                    .show_separator_line(false)
+                    .show(ui, |ui| {
+                        ui.add_space(10.0);
+                        if let Some(panel) = &mut self.server {
+                            panel.show(ui, &self.config);
+                        }
+                        ui.add_space(8.0);
+                        self.version_row(ui, &ctx);
+                    });
                 connect |= self.favorites_panel(ui);
             });
-        let width = 420.0;
-        egui::CentralPanel::default().show(root, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.vertical_centered(|ui| {
-                    self.update_banner(ui, &ctx, width);
-                    ui.add_space(24.0);
-                    ui.heading("VNC Beach");
-                    ui.label("Mit einem VNC-Server verbinden");
-                    ui.add_space(16.0);
-                    ui.allocate_ui_with_layout(
-                        Vec2::new(width, ui.available_height()),
-                        Layout::top_down(Align::Min),
-                        |ui| {
-                            connect |= self.form_fields(ui, width);
-                            if let Some(err) = &self.error {
-                                ui.add_space(10.0);
-                                ui.colored_label(Color32::from_rgb(230, 90, 80), err);
-                            }
-                            ui.add_space(24.0);
-                        },
-                    );
+        let width = 460.0;
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(p.canvas)
+                    .inner_margin(Margin::symmetric(28, 24)),
+            )
+            .show(root, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.allocate_ui_with_layout(
+                            Vec2::new(width, ui.available_height()),
+                            Layout::top_down(Align::Min),
+                            |ui| {
+                                ui.set_width(width);
+                                ui.add_space(8.0);
+                                self.update_banner(ui, &ctx, width);
+                                connect |= self.form_fields(ui, width);
+                                if let Some(err) = self.error.clone() {
+                                    ui.add_space(12.0);
+                                    theme::banner(ui, theme::CORAL).show(ui, |ui| {
+                                        ui.set_width(width - 28.0);
+                                        ui.label(RichText::new(err).color(p.text));
+                                    });
+                                }
+                                ui.add_space(24.0);
+                            },
+                        );
+                    });
                 });
             });
-        });
         if connect && self.can_connect() {
             self.connect(&ctx);
         }
@@ -265,22 +309,27 @@ impl App {
     /// "Version x.y.z" and the manual update check, at the bottom of the
     /// sidebar.
     fn version_row(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui.horizontal_wrapped(|ui| {
-            ui.weak(format!("Version {}", Version::current()));
-            let busy = matches!(self.update, Update::Checking { .. } | Update::Installing(_));
-            let button = ui.add_enabled(!busy, egui::Button::new("Nach Updates suchen").small());
-            if button.clicked() {
-                self.update = Update::check(ctx, true);
-            }
-            if matches!(self.update, Update::Checking { manual: true, .. }) {
-                ui.spinner();
-            }
+        ui.horizontal(|ui| {
+            ui.small(RichText::new(format!("Version {}", Version::current())).weak());
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let busy = matches!(self.update, Update::Checking { .. } | Update::Installing(_));
+                let button = theme::Button::new("Nach Updates suchen", Kind::Ghost)
+                    .small()
+                    .enabled(!busy)
+                    .show(ui);
+                if button.clicked() {
+                    self.update = Update::check(ctx, true);
+                }
+                if matches!(self.update, Update::Checking { manual: true, .. }) {
+                    ui.spinner();
+                }
+            });
         });
     }
 
     /// News about updates above the connect form.
     fn update_banner(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, width: f32) {
-        let accent = Color32::from_rgb(63, 180, 230);
+        let p = Palette::of(ui);
         let text = match &self.update {
             Update::Available(r) => format!(
                 "VNC Beach {} ist verfügbar. Installiert ist {}.",
@@ -293,63 +342,73 @@ impl App {
             Update::Idle | Update::Checking { .. } => return,
         };
         let failed = matches!(self.update, Update::Failed(_));
-        ui.add_space(12.0);
-        egui::Frame::group(ui.style())
-            .stroke(egui::Stroke::new(
-                1.0,
-                if failed {
-                    Color32::from_rgb(230, 90, 80)
-                } else {
-                    accent
-                },
-            ))
-            .inner_margin(10.0)
-            .show(ui, |ui| {
-                ui.set_width(width - 22.0);
-                ui.horizontal_wrapped(|ui| {
-                    if matches!(self.update, Update::Installing(_)) {
-                        ui.spinner();
-                    }
-                    ui.label(text);
-                });
-                let mut next = None;
-                ui.horizontal(|ui| match &self.update {
-                    Update::Available(release) => {
-                        if release.asset.is_some() && update::can_install() {
-                            if ui.button("Jetzt aktualisieren").clicked() {
-                                next = Some(Update::install(ctx, release.clone()));
-                            }
-                        } else if ui.button("Download-Seite öffnen").clicked() {
-                            ctx.open_url(egui::OpenUrl::new_tab(&release.page));
+        let color = if failed { theme::CORAL } else { p.accent };
+        theme::banner(ui, color).show(ui, |ui| {
+            ui.set_width(width - 28.0);
+            ui.horizontal_wrapped(|ui| {
+                if matches!(self.update, Update::Installing(_)) {
+                    ui.spinner();
+                }
+                ui.label(RichText::new(text).color(p.text));
+            });
+            let mut next = None;
+            ui.horizontal(|ui| match &self.update {
+                Update::Available(release) => {
+                    if release.asset.is_some() && update::can_install() {
+                        if theme::button(ui, "Jetzt aktualisieren", Kind::Primary).clicked() {
+                            next = Some(Update::install(ctx, release.clone()));
                         }
-                        if ui.button("Später").clicked() {
-                            next = Some(Update::Idle);
-                        }
+                    } else if theme::button(ui, "Download-Seite öffnen", Kind::Primary).clicked() {
+                        ctx.open_url(egui::OpenUrl::new_tab(&release.page));
                     }
-                    Update::Current | Update::Failed(_) if ui.button("OK").clicked() => {
+                    if theme::button(ui, "Später", Kind::Ghost).clicked() {
                         next = Some(Update::Idle);
                     }
-                    _ => {}
-                });
-                if let Some(next) = next {
-                    self.update = next;
                 }
+                Update::Current | Update::Failed(_) => {
+                    if theme::button(ui, "OK", Kind::Secondary).clicked() {
+                        next = Some(Update::Idle);
+                    }
+                }
+                _ => {}
             });
+            if let Some(next) = next {
+                self.update = next;
+            }
+        });
+        ui.add_space(16.0);
     }
 
     /// The favorites list in the side panel. Returns true if one should be
-    /// connected to (double click).
+    /// connected to (double click or the arrow button).
     fn favorites_panel(&mut self, ui: &mut egui::Ui) -> bool {
+        let p = Palette::of(ui);
         let mut connect = false;
         let mut select = None;
-        ui.add_space(8.0);
         ui.horizontal(|ui| {
-            let heading = ui.label(RichText::new("Favoriten").strong().size(16.0));
+            ui.add(
+                egui::Image::from_texture(SizedTexture::new(self.logo.id(), Vec2::splat(30.0)))
+                    .corner_radius(8.0),
+            );
+            ui.add_space(2.0);
+            ui.label(RichText::new("VNC Beach").font(theme::bold(18.0)).color(p.text));
+        });
+        ui.add_space(16.0);
+        ui.horizontal(|ui| {
+            let heading = theme::section_label(ui, "Favoriten");
             if let Some(path) = self.directory.path() {
                 heading.on_hover_text(format!("Gespeichert in {}", path.display()));
             }
+            let count = self.directory.servers.len();
+            if count > 0 {
+                theme::pill(ui, &count.to_string(), p.weak);
+            }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let new = ui.add_enabled(self.editing.is_some(), egui::Button::new("Neu"));
+                let fresh = self.editing.is_none() && self.form == Server::default();
+                let new = theme::Button::new("+ Neu", Kind::Ghost)
+                    .small()
+                    .enabled(!fresh)
+                    .show(ui);
                 if new
                     .on_hover_text("Formular leeren für einen neuen Favoriten")
                     .clicked()
@@ -358,27 +417,63 @@ impl App {
                 }
             });
         });
-        ui.add_space(6.0);
+        ui.add_space(8.0);
         if self.directory.servers.is_empty() {
-            ui.add_space(8.0);
-            ui.weak("Noch keine Favoriten.");
-            ui.add_space(4.0);
-            ui.weak("Rechts Name, Adresse und Passwort eingeben und auf „Als Favorit speichern“ klicken.");
+            egui::Frame::new()
+                .stroke(Stroke::new(1.0, p.card_stroke))
+                .corner_radius(CornerRadius::same(12))
+                .inner_margin(Margin::same(16))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(RichText::new("Noch keine Favoriten").font(theme::semibold(14.0)));
+                    ui.add_space(2.0);
+                    ui.label(
+                        RichText::new(
+                            "Rechts Name, Adresse und Passwort eingeben und auf „Als Favorit speichern“ klicken.",
+                        )
+                        .size(12.5)
+                        .color(p.weak),
+                    );
+                });
             return false;
         }
+        if self.directory.servers.len() >= 6 {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.filter)
+                    .hint_text("Favoriten durchsuchen")
+                    .margin(Margin::symmetric(10, 6))
+                    .desired_width(f32::INFINITY),
+            );
+            ui.add_space(4.0);
+        } else {
+            self.filter.clear();
+        }
+        let filter = self.filter.trim().to_lowercase();
         egui::ScrollArea::vertical().id_salt("favorites").show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 6.0;
+            let mut shown = 0;
             for (i, server) in self.directory.servers.iter().enumerate() {
-                let selected = self.editing == Some(i);
-                let row = favorite_row(ui, server, selected);
-                if row.double_clicked() {
+                if !filter.is_empty()
+                    && !server.name.to_lowercase().contains(&filter)
+                    && !server.host.to_lowercase().contains(&filter)
+                {
+                    continue;
+                }
+                shown += 1;
+                let card = favorite_card(ui, server, self.editing == Some(i));
+                if card.connect {
                     select = Some(i);
                     connect = true;
-                } else if row.clicked() {
+                } else if card.select {
                     select = Some(i);
                 }
             }
-            ui.add_space(8.0);
-            ui.weak("Klick lädt den Favoriten ins Formular, Doppelklick verbindet.");
+            if shown == 0 {
+                ui.add_space(8.0);
+                ui.weak("Kein Favorit passt zur Suche.");
+            }
+            ui.add_space(6.0);
+            ui.small(RichText::new("Klick wählt aus, Doppelklick oder der Pfeil verbindet.").weak());
         });
         if let Some(i) = select {
             self.select(i);
@@ -386,101 +481,142 @@ impl App {
         connect
     }
 
-    /// Name, address and password. Returns true if Enter or "Verbinden" was hit.
+    /// Name, address and password in a card. Returns true if Enter or
+    /// "Verbinden" was hit.
     fn form_fields(&mut self, ui: &mut egui::Ui, width: f32) -> bool {
+        let p = Palette::of(ui);
         let connecting = matches!(self.state, State::Connecting(..));
         let saved = self.editing.and_then(|i| self.directory.servers.get(i)).cloned();
         let modified = saved.as_ref().is_some_and(|s| *s != self.form);
-        let title = if saved.is_some() {
-            "Favorit bearbeiten"
+        let (title, subtitle) = if saved.is_some() {
+            (
+                "Favorit bearbeiten",
+                "Änderungen gelten für diesen Favoriten, sobald du speicherst.",
+            )
         } else {
-            "Neue Verbindung"
+            (
+                "Neue Verbindung",
+                "Adresse des VNC-Servers eingeben, optional mit Name und Passwort.",
+            )
         };
         ui.horizontal(|ui| {
-            ui.label(RichText::new(title).strong());
+            ui.label(RichText::new(title).font(theme::bold(22.0)).color(p.text));
             if modified {
-                ui.weak("– nicht gespeicherte Änderungen");
+                ui.add_space(4.0);
+                theme::pill(ui, "Nicht gespeichert", theme::AMBER);
             }
         });
-        ui.add_space(4.0);
-        let name = ui.add(
-            egui::TextEdit::singleline(&mut self.form.name)
-                .hint_text("Name in der Favoritenliste, z. B. Mac Büro (optional)")
-                .desired_width(width),
-        );
-        ui.add_space(6.0);
-        let host = ui.add(
-            egui::TextEdit::singleline(&mut self.form.host)
-                .hint_text("Adresse, z. B. 192.168.1.20 oder mac.local")
-                .desired_width(width),
-        );
-        ui.add_space(6.0);
-        let pw = ui.add(
-            egui::TextEdit::singleline(&mut self.form.password)
-                .password(true)
-                .hint_text("Passwort")
-                .desired_width(width),
-        );
-        ui.add_space(6.0);
-        self.settings_section(ui, width);
-        ui.add_space(10.0);
-        let enter = (name.lost_focus() || host.lost_focus() || pw.lost_focus())
-            && ui.input(|i| i.key_pressed(Key::Enter));
-        let has_host = !self.form.host.trim().is_empty();
-        let gap = ui.spacing().item_spacing.x;
+        ui.label(RichText::new(subtitle).color(p.weak));
+        ui.add_space(14.0);
+
+        let inner = width - 34.0;
+        let field_margin = Margin::symmetric(10, 7);
         let mut connect = false;
-        ui.horizontal(|ui| {
-            let button_width = (width - gap) / 2.0;
-            let button = ui.add_enabled(
-                !connecting && has_host,
-                egui::Button::new(if connecting { "Verbinde …" } else { "Verbinden" })
-                    .min_size(Vec2::new(button_width, 28.0)),
+        let mut fields = None;
+        theme::card(ui).show(ui, |ui| {
+            ui.set_width(inner);
+            theme::field_label(ui, "Name");
+            let name = ui.add(
+                egui::TextEdit::singleline(&mut self.form.name)
+                    .hint_text("z. B. Mac Büro (optional)")
+                    .margin(field_margin)
+                    .desired_width(inner),
             );
-            connect = button.clicked() || enter;
-            let label = if saved.is_some() {
-                "Speichern"
-            } else {
-                "Als Favorit speichern"
-            };
-            let save = ui.add_enabled(
-                has_host,
-                egui::Button::new(label).min_size(Vec2::new(button_width, 28.0)),
+            ui.add_space(8.0);
+            theme::field_label(ui, "Adresse");
+            let host = ui.add(
+                egui::TextEdit::singleline(&mut self.form.host)
+                    .hint_text("192.168.1.20 oder mac.local, bei Bedarf mit :Port")
+                    .margin(field_margin)
+                    .desired_width(inner),
             );
-            if save.clicked() {
-                self.save_form();
-            }
-        });
-        if let Some(index) = self.editing {
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                let button_width = (width - gap) / 2.0;
-                let label = if self.confirm_delete {
-                    "Wirklich löschen?"
-                } else {
-                    "Favorit löschen"
-                };
-                let delete = ui.add(egui::Button::new(label).min_size(Vec2::new(button_width, 28.0)));
-                if delete.clicked() {
-                    if self.confirm_delete {
-                        self.confirm_delete = false;
-                        self.delete(index);
+            ui.add_space(8.0);
+            theme::field_label(ui, "Passwort");
+            let pw = ui
+                .horizontal(|ui| {
+                    let pw = ui.add(
+                        egui::TextEdit::singleline(&mut self.form.password)
+                            .password(!self.show_password)
+                            .hint_text("Passwort des Servers")
+                            .margin(field_margin)
+                            .desired_width(inner - 96.0),
+                    );
+                    let eye = if self.show_password {
+                        "Verbergen"
                     } else {
-                        self.confirm_delete = true;
+                        "Anzeigen"
+                    };
+                    if theme::Button::new(eye, Kind::Ghost).small().show(ui).clicked() {
+                        self.show_password = !self.show_password;
                     }
-                } else if self.confirm_delete && ui.input(|i| i.pointer.any_click()) {
-                    self.confirm_delete = false;
-                }
-                let discard = ui.add_enabled(
-                    modified,
-                    egui::Button::new("Änderungen verwerfen").min_size(Vec2::new(button_width, 28.0)),
-                );
-                if discard.clicked() {
-                    self.select(index);
+                    pw
+                })
+                .inner;
+            ui.add_space(12.0);
+            self.settings_section(ui, inner);
+            ui.add_space(14.0);
+
+            let enter = (name.lost_focus() || host.lost_focus() || pw.lost_focus())
+                && ui.input(|i| i.key_pressed(Key::Enter));
+            let has_host = !self.form.host.trim().is_empty();
+            let gap = 8.0;
+            let half = Vec2::new((inner - gap) / 2.0, 36.0);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                let label = if connecting { "Verbinde …" } else { "Verbinden" };
+                let button = theme::Button::new(label, Kind::Primary)
+                    .enabled(!connecting && has_host)
+                    .min_size(half)
+                    .show(ui);
+                connect = button.clicked() || enter;
+                let label = if saved.is_some() {
+                    "Speichern"
+                } else {
+                    "Als Favorit speichern"
+                };
+                let save = theme::Button::new(label, Kind::Secondary)
+                    .enabled(has_host)
+                    .min_size(half)
+                    .show(ui);
+                if save.clicked() {
+                    self.save_form();
                 }
             });
-        }
-        if self.form.host.is_empty() && !name.has_focus() && !host.has_focus() && !pw.has_focus() {
-            host.request_focus();
+            if let Some(index) = self.editing {
+                ui.add_space(2.0);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    let label = if self.confirm_delete {
+                        "Wirklich löschen?"
+                    } else {
+                        "Favorit löschen"
+                    };
+                    let delete = theme::Button::new(label, Kind::Danger).min_size(half).show(ui);
+                    if delete.clicked() {
+                        if self.confirm_delete {
+                            self.confirm_delete = false;
+                            self.delete(index);
+                        } else {
+                            self.confirm_delete = true;
+                        }
+                    } else if self.confirm_delete && ui.input(|i| i.pointer.any_click()) {
+                        self.confirm_delete = false;
+                    }
+                    let discard = theme::Button::new("Änderungen verwerfen", Kind::Ghost)
+                        .enabled(modified)
+                        .min_size(half)
+                        .show(ui);
+                    if discard.clicked() {
+                        self.select(index);
+                    }
+                });
+            }
+            fields = Some((name, host, pw));
+        });
+        if let Some((name, host, pw)) = fields {
+            if self.form.host.is_empty() && !name.has_focus() && !host.has_focus() && !pw.has_focus() {
+                host.request_focus();
+            }
         }
         connect
     }
@@ -542,25 +678,69 @@ impl eframe::App for App {
 impl App {
     /// Collapsible per-connection settings; each one can follow the defaults.
     fn settings_section(&mut self, ui: &mut egui::Ui, width: f32) {
+        let p = Palette::of(ui);
         let changed = self.form.settings != Overrides::default();
-        let title = if changed {
-            "Einstellungen (abweichend)"
-        } else {
-            "Einstellungen"
-        };
-        egui::CollapsingHeader::new(title)
-            .id_salt("settings")
-            .default_open(changed)
+        egui::Frame::new()
+            .fill(p.canvas)
+            .stroke(Stroke::new(1.0, p.card_stroke))
+            .corner_radius(CornerRadius::same(10))
+            .inner_margin(Margin::symmetric(12, 10))
             .show(ui, |ui| {
-                ui.set_width(width);
+                let inner = width - 26.0;
+                ui.set_width(inner);
+                let (rect, header) = ui.allocate_exact_size(Vec2::new(inner, 22.0), Sense::click());
+                let header = header.on_hover_cursor(CursorIcon::PointingHand);
+                if header.clicked() {
+                    self.settings_open = !self.settings_open;
+                }
+                let chevron = Pos2::new(rect.left() + 7.0, rect.center().y);
+                let color = if header.hovered() { p.accent } else { p.weak };
+                theme::paint_chevron(ui, chevron, 8.0, self.settings_open, color);
+                ui.painter().text(
+                    Pos2::new(rect.left() + 22.0, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    "Einstellungen",
+                    theme::semibold(13.5),
+                    p.text,
+                );
+                let (summary, summary_color) = if changed {
+                    ("Abweichend", theme::AMBER)
+                } else {
+                    ("Standard", p.weak)
+                };
+                let galley =
+                    ui.painter()
+                        .layout_no_wrap(summary.into(), theme::semibold(11.0), summary_color);
+                let size = galley.size() + Vec2::new(14.0, 6.0);
+                let tag = Rect::from_min_size(
+                    Pos2::new(rect.right() - size.x, rect.center().y - size.y / 2.0),
+                    size,
+                );
+                ui.painter()
+                    .rect_filled(tag, CornerRadius::same(99), p.tint(summary_color));
+                ui.painter()
+                    .galley(tag.center() - galley.size() / 2.0, galley, summary_color);
+                if !self.settings_open {
+                    return;
+                }
+                ui.add_space(10.0);
                 let defaults = self.config.viewer;
                 settings_grid(ui, "overrides", &mut self.form.settings, Some(defaults));
-                ui.add_space(6.0);
+                ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    if ui.small_button("Standardeinstellungen …").clicked() {
+                    if theme::Button::new("Standardeinstellungen …", Kind::Ghost)
+                        .small()
+                        .show(ui)
+                        .clicked()
+                    {
                         self.defaults = Some(all_set(self.config.viewer));
                     }
-                    if changed && ui.small_button("Alles auf Standard").clicked() {
+                    if changed
+                        && theme::Button::new("Alles auf Standard", Kind::Ghost)
+                            .small()
+                            .show(ui)
+                            .clicked()
+                    {
                         self.form.settings = Overrides::default();
                     }
                 });
@@ -575,19 +755,19 @@ impl App {
         let mut open = true;
         let mut save = false;
         let mut cancel = false;
-        egui::Window::new("Standardeinstellungen")
+        egui::Window::new(RichText::new("Standardeinstellungen").font(theme::bold(17.0)))
             .collapsible(false)
             .resizable(false)
             .open(&mut open)
             .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
-                ui.label("Gelten für jede Verbindung, bei der nichts anderes eingestellt ist.");
-                ui.add_space(8.0);
-                settings_grid(ui, "defaults", &mut draft, None);
+                ui.weak("Gelten für jede Verbindung, bei der nichts anderes eingestellt ist.");
                 ui.add_space(10.0);
+                settings_grid(ui, "defaults", &mut draft, None);
+                ui.add_space(14.0);
                 ui.horizontal(|ui| {
-                    save = ui.button("Speichern").clicked();
-                    cancel = ui.button("Abbrechen").clicked();
+                    save = theme::button(ui, "Speichern", Kind::Primary).clicked();
+                    cancel = theme::button(ui, "Abbrechen", Kind::Ghost).clicked();
                 });
             });
         if save {
@@ -663,6 +843,9 @@ fn all_set(s: Settings) -> Overrides {
 
 /// One row per setting. With `defaults`, each row also offers "Standard".
 fn settings_grid(ui: &mut egui::Ui, id: &str, values: &mut Overrides, defaults: Option<Settings>) {
+    // The label column plus spacing; the combos take the rest and truncate
+    // long choices instead of widening the card.
+    let combo_width = (ui.available_width() - 146.0).clamp(200.0, 320.0);
     egui::Grid::new(id)
         .num_columns(2)
         .spacing([12.0, 6.0])
@@ -672,32 +855,49 @@ fn settings_grid(ui: &mut egui::Ui, id: &str, values: &mut Overrides, defaults: 
                 &VIEW_ONLY,
                 &mut values.view_only,
                 defaults.map(|d| d.view_only),
+                combo_width,
             );
-            option_combo(ui, &SCALING, &mut values.scaling, defaults.map(|d| d.scaling));
-            option_combo(ui, &COLORS, &mut values.colors, defaults.map(|d| d.colors));
+            option_combo(
+                ui,
+                &SCALING,
+                &mut values.scaling,
+                defaults.map(|d| d.scaling),
+                combo_width,
+            );
+            option_combo(
+                ui,
+                &COLORS,
+                &mut values.colors,
+                defaults.map(|d| d.colors),
+                combo_width,
+            );
             option_combo(
                 ui,
                 &CLIPBOARD,
                 &mut values.clipboard,
                 defaults.map(|d| d.clipboard),
+                combo_width,
             );
             option_combo(
                 ui,
                 &SHORTCUTS,
                 &mut values.shortcuts,
                 defaults.map(|d| d.shortcuts),
+                combo_width,
             );
             option_combo(
                 ui,
                 &FULLSCREEN,
                 &mut values.fullscreen,
                 defaults.map(|d| d.fullscreen),
+                combo_width,
             );
             option_combo(
                 ui,
                 &FIT_WINDOW,
                 &mut values.fit_window,
                 defaults.map(|d| d.fit_window),
+                combo_width,
             );
         });
 }
@@ -707,6 +907,7 @@ fn option_combo<T: Copy + PartialEq + 'static>(
     field: &Field<T>,
     value: &mut Option<T>,
     default: Option<T>,
+    width: f32,
 ) {
     let name = |v: T| {
         field
@@ -724,7 +925,8 @@ fn option_combo<T: Copy + PartialEq + 'static>(
     ui.label(field.label);
     egui::ComboBox::from_id_salt(field.label)
         .selected_text(selected)
-        .width(260.0)
+        .width(width)
+        .truncate()
         .show_ui(ui, |ui| {
             if let Some(d) = default {
                 ui.selectable_value(value, None, format!("Standard: {}", name(d)));
@@ -736,42 +938,111 @@ fn option_combo<T: Copy + PartialEq + 'static>(
     ui.end_row();
 }
 
-/// One entry of the favorites list: name and address, left-aligned, with the
-/// usual hover and selection colours.
-fn favorite_row(ui: &mut egui::Ui, server: &Server, selected: bool) -> egui::Response {
-    let size = Vec2::new(ui.available_width(), 44.0);
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
-    if ui.is_rect_visible(rect) {
-        let visuals = ui.style().interact_selectable(&response, selected);
-        let fill = if selected || response.hovered() {
-            visuals.weak_bg_fill
-        } else {
-            Color32::TRANSPARENT
-        };
-        ui.painter().rect(
-            rect,
-            visuals.corner_radius,
-            fill,
-            visuals.bg_stroke,
-            egui::StrokeKind::Inside,
-        );
-        let inner = rect.shrink2(Vec2::new(10.0, 6.0));
-        ui.painter().text(
-            inner.left_top(),
-            egui::Align2::LEFT_TOP,
-            &server.name,
-            egui::FontId::proportional(14.0),
-            visuals.text_color(),
-        );
-        ui.painter().text(
-            inner.left_bottom(),
-            egui::Align2::LEFT_BOTTOM,
-            &server.host,
-            egui::FontId::proportional(12.0),
-            ui.visuals().weak_text_color(),
-        );
+/// What a click on a favorite's card asked for.
+struct CardResponse {
+    select: bool,
+    connect: bool,
+}
+
+/// One favorite: avatar with monogram, name and address, tags for settings
+/// that deviate from the defaults, and an arrow button that connects.
+fn favorite_card(ui: &mut egui::Ui, server: &Server, selected: bool) -> CardResponse {
+    let p = Palette::of(ui);
+    let height = 60.0;
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::click());
+    let response = response.on_hover_cursor(CursorIcon::PointingHand);
+    let mut out = CardResponse {
+        select: response.clicked(),
+        connect: response.double_clicked(),
+    };
+    // The button is registered after the row, so it gets the clicks there.
+    let play_rect =
+        Rect::from_center_size(Pos2::new(rect.right() - 28.0, rect.center().y), Vec2::splat(32.0));
+    let play = ui
+        .interact(play_rect, response.id.with("connect"), Sense::click())
+        .on_hover_cursor(CursorIcon::PointingHand)
+        .on_hover_text("Verbinden");
+    if play.clicked() {
+        out.connect = true;
     }
-    response
+    if !ui.is_rect_visible(rect) {
+        return out;
+    }
+    let hovered = response.contains_pointer();
+    let (fill, stroke) = if selected {
+        (p.tint(p.accent), Stroke::new(1.5, p.accent))
+    } else if hovered {
+        (p.button, Stroke::new(1.0, p.card_stroke))
+    } else {
+        (p.card, Stroke::new(1.0, p.card_stroke))
+    };
+    let painter = ui.painter();
+    painter.rect(rect, CornerRadius::same(12), fill, stroke, StrokeKind::Inside);
+    let avatar = Rect::from_min_size(
+        rect.left_top() + Vec2::new(12.0, (height - 36.0) / 2.0),
+        Vec2::splat(36.0),
+    );
+    theme::paint_avatar(ui, avatar, &server.name);
+    if selected || hovered {
+        let fill = if play.hovered() {
+            p.accent.lerp_to_gamma(Color32::WHITE, 0.15)
+        } else {
+            p.accent
+        };
+        painter.circle_filled(play_rect.center(), 15.0, fill);
+        theme::paint_play(ui, play_rect.center() + Vec2::new(1.0, 0.0), 11.0, p.on_accent);
+    } else {
+        theme::paint_chevron(ui, play_rect.center(), 9.0, false, p.weak.gamma_multiply(0.6));
+    }
+    let text_left = avatar.right() + 12.0;
+    let name = painter.layout_no_wrap(server.name.clone(), theme::semibold(14.0), p.text);
+    let host = painter.layout_no_wrap(server.host.clone(), FontId::proportional(12.0), p.weak);
+    // Tags only take the room the name and address leave over.
+    let text_right = text_left + name.size().x.max(host.size().x) + 10.0;
+    let mut right = play_rect.left() - 6.0;
+    for tag in tags(&server.settings).iter().take(2) {
+        let galley = painter.layout_no_wrap((*tag).to_owned(), theme::semibold(10.5), p.weak);
+        let size = galley.size() + Vec2::new(12.0, 5.0);
+        if right - size.x < text_right {
+            break;
+        }
+        let tag_rect = Rect::from_min_size(Pos2::new(right - size.x, rect.center().y - size.y / 2.0), size);
+        painter.rect_filled(tag_rect, CornerRadius::same(99), p.tint(p.weak));
+        painter.galley(tag_rect.center() - galley.size() / 2.0, galley, p.weak);
+        right = tag_rect.left() - 6.0;
+    }
+    let clip = Rect::from_min_max(
+        Pos2::new(text_left, rect.top()),
+        Pos2::new(right - 4.0, rect.bottom()),
+    );
+    let painter = painter.with_clip_rect(clip);
+    painter.galley(
+        Pos2::new(text_left, rect.center().y - 1.0 - name.size().y),
+        name,
+        p.text,
+    );
+    painter.galley(Pos2::new(text_left, rect.center().y + 2.0), host, p.weak);
+    out
+}
+
+/// Short labels for the settings a favorite overrides.
+fn tags(o: &Overrides) -> Vec<&'static str> {
+    let mut tags = Vec::new();
+    if o.view_only == Some(true) {
+        tags.push("Nur ansehen");
+    }
+    match o.colors {
+        Some(Colors::Low) => tags.push("256 Farben"),
+        Some(Colors::Medium) => tags.push("16 Bit"),
+        _ => {}
+    }
+    if o.fullscreen == Some(true) {
+        tags.push("Vollbild");
+    }
+    if tags.is_empty() && !o.is_empty() {
+        tags.push("Angepasst");
+    }
+    tags
 }
 
 /// Which keysyms stand for Ctrl, Cmd and Alt/Option on the remote machine.
@@ -817,6 +1088,10 @@ struct Remote {
     texture: Option<egui::TextureHandle>,
     generation: u64,
     fb_size: [usize; 2],
+    /// The server's displays, if it told us (ExtendedDesktopSize).
+    screens: Vec<Screen>,
+    /// Index into `screens` of the display shown alone; `None` shows all.
+    view: Option<usize>,
     buttons: u8,
     /// Modifier keysyms currently held on the server.
     modifiers: Vec<u32>,
@@ -844,6 +1119,8 @@ impl Remote {
             texture: None,
             generation: u64::MAX,
             fb_size: [0, 0],
+            screens: Vec::new(),
+            view: None,
             buttons: 0,
             modifiers: Vec::new(),
             keys_down: HashMap::new(),
@@ -851,10 +1128,38 @@ impl Remote {
         }
     }
 
+    /// The part of the framebuffer on show: one display or all of it.
+    fn crop_of(&self, fb_width: usize, fb_height: usize) -> Region {
+        match self.view.and_then(|i| self.screens.get(i)) {
+            Some(s) => (s.x as usize, s.y as usize, s.width as usize, s.height as usize),
+            None => (0, 0, fb_width, fb_height),
+        }
+    }
+
+    fn crop(&self) -> Region {
+        self.crop_of(self.fb_size[0], self.fb_size[1])
+    }
+
+    /// Shows one display (or all, `None`) and refits the window.
+    fn select_screen(&mut self, view: Option<usize>, ctx: &egui::Context) {
+        self.view = view;
+        let (fb_width, fb_height) = {
+            let fb = self.conn.fb.lock().unwrap();
+            (fb.width, fb.height)
+        };
+        let region = view.map(|_| self.crop_of(fb_width, fb_height));
+        self.conn.set_region(region);
+        let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+        if self.settings.fit_window && !fullscreen {
+            self.fit_window(ctx);
+        }
+    }
+
     /// Sizes the window to the remote screen, within the monitor.
     fn fit_window(&self, ctx: &egui::Context) {
         let fb = self.conn.fb.lock().unwrap();
-        let (w, h) = (fb.width as f32, fb.height as f32);
+        let (_, _, w, h) = self.crop_of(fb.width, fb.height);
+        let (w, h) = (w.max(1) as f32, h.max(1) as f32);
         drop(fb);
         let Some(monitor) = ctx.input(|i| i.viewport().monitor_size) else {
             return;
@@ -925,6 +1230,24 @@ impl Remote {
                         {
                             self.settings.scaling = if fit { Scaling::Original } else { Scaling::Fit };
                         }
+                        if self.screens.len() > 1 {
+                            let mut view = self.view;
+                            egui::ComboBox::from_id_salt("screen")
+                                .selected_text(screen_label(&self.screens, view))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut view, None, screen_label(&self.screens, None));
+                                    for i in 0..self.screens.len() {
+                                        ui.selectable_value(
+                                            &mut view,
+                                            Some(i),
+                                            screen_label(&self.screens, Some(i)),
+                                        );
+                                    }
+                                });
+                            if view != self.view {
+                                self.select_screen(view, ctx);
+                            }
+                        }
                         let mut view_only = self.settings.view_only;
                         if ui.checkbox(&mut view_only, "Nur ansehen").changed() {
                             self.settings.view_only = view_only;
@@ -945,14 +1268,16 @@ impl Remote {
             .show(root, |ui| match self.settings.scaling {
                 Scaling::Fit => {
                     let avail = ui.available_rect_before_wrap();
-                    let [w, h] = self.fb_size.map(|v| v.max(1) as f32);
+                    let (_, _, w, h) = self.crop();
+                    let (w, h) = (w.max(1) as f32, h.max(1) as f32);
                     let scale = (avail.width() / w).min(avail.height() / h);
                     let image_rect = Rect::from_center_size(avail.center(), Vec2::new(w * scale, h * scale));
                     self.screen(ctx, ui, avail, image_rect);
                 }
                 Scaling::Original => {
                     // One remote pixel per physical pixel.
-                    let [w, h] = self.fb_size.map(|v| v.max(1) as f32 / ctx.pixels_per_point());
+                    let (_, _, w, h) = self.crop();
+                    let [w, h] = [w, h].map(|v| v.max(1) as f32 / ctx.pixels_per_point());
                     egui::ScrollArea::both().show(ui, |ui| {
                         let avail = ui.available_rect_before_wrap();
                         let size = Vec2::new(w.max(avail.width()), h.max(avail.height()));
@@ -983,12 +1308,13 @@ impl Remote {
             )
         });
         if let Some(tex) = &self.texture {
-            ui.painter().image(
-                tex.id(),
-                image_rect,
-                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                Color32::WHITE,
+            let [fw, fh] = self.fb_size.map(|v| v.max(1) as f32);
+            let (x, y, w, h) = self.crop();
+            let uv = Rect::from_min_max(
+                Pos2::new(x as f32 / fw, y as f32 / fh),
+                Pos2::new((x + w) as f32 / fw, (y + h) as f32 / fh),
             );
+            ui.painter().image(tex.id(), image_rect, uv, Color32::WHITE);
         }
         if !self.settings.view_only {
             self.handle_input(ctx, image_rect);
@@ -1003,10 +1329,24 @@ impl Remote {
         self.generation = fb.generation;
         self.fb_size = [fb.width, fb.height];
         let image = egui::ColorImage::from_rgba_unmultiplied(self.fb_size, &fb.rgba);
+        let screens_changed = fb.screens != self.screens;
+        if screens_changed {
+            self.screens = fb.screens.clone();
+        }
         drop(fb);
         match &mut self.texture {
             Some(tex) => tex.set(image, egui::TextureOptions::LINEAR),
             None => self.texture = Some(ctx.load_texture("remote", image, egui::TextureOptions::LINEAR)),
+        }
+        if screens_changed {
+            // The arrangement changed under us: the client dropped its
+            // region, so ask again for the display we show (if it still exists).
+            let view = self.view.filter(|&i| i < self.screens.len());
+            if view.is_some() {
+                self.select_screen(view, ctx);
+            } else if self.view.is_some() {
+                self.view = None;
+            }
         }
     }
 
@@ -1110,10 +1450,11 @@ impl Remote {
     }
 
     fn pointer(&self, pos: Pos2, image_rect: Rect) -> ClientMessage {
-        let [w, h] = self.fb_size;
+        let (cx, cy, w, h) = self.crop();
         let rel = (pos - image_rect.min) / image_rect.size();
-        let x = (rel.x * w as f32).clamp(0.0, w.saturating_sub(1) as f32) as u16;
-        let y = (rel.y * h as f32).clamp(0.0, h.saturating_sub(1) as f32) as u16;
+        let x = cx as f32 + (rel.x * w as f32).clamp(0.0, w.saturating_sub(1) as f32);
+        let y = cy as f32 + (rel.y * h as f32).clamp(0.0, h.saturating_sub(1) as f32);
+        let (x, y) = (x as u16, y as u16);
         ClientMessage::PointerEvent {
             buttons: self.buttons,
             x,
@@ -1297,3 +1638,11 @@ impl Remote {
 }
 
 const TOOLBAR_HEIGHT: f32 = 30.0;
+
+/// Toolbar text for the display choice.
+fn screen_label(screens: &[Screen], view: Option<usize>) -> String {
+    match view.and_then(|i| screens.get(i).map(|s| (i, s))) {
+        Some((i, s)) => format!("Bildschirm {} ({}×{})", i + 1, s.width, s.height),
+        None => "Alle Bildschirme".to_string(),
+    }
+}

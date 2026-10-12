@@ -1,7 +1,7 @@
 use anyhow::bail;
 use clap::Parser;
 
-use beach_server::{Options, Server};
+use beach_server::{Display, Options, Server};
 
 /// VNC Beach server: shares this computer's screen over VNC (RFB).
 #[derive(Parser, Debug)]
@@ -20,9 +20,10 @@ struct Args {
     /// Accept connections without any password. Only for trusted networks.
     #[arg(long, conflicts_with = "password")]
     no_password: bool,
-    /// Display to share (index from --list-displays). Defaults to the primary one.
-    #[arg(short, long)]
-    display: Option<usize>,
+    /// Displays to share: "all" (one virtual desktop, the default), "primary"
+    /// or an index from --list-displays.
+    #[arg(short, long, default_value_t = Display::All)]
+    display: Display,
     /// List displays and exit.
     #[arg(long)]
     list_displays: bool,

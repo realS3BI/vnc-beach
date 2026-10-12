@@ -125,11 +125,27 @@ der Rechner kein Mac ist (⌘C kopiert in Windows). Bei macOS-Bildschirmfreigabe
 wird ⌘ als Alt_L und Option als Meta_L gesendet, wie Apple es erwartet.
 Die Bildschirmtastatur hat eine Zusatzleiste mit Esc, Tab, Strg, Alt, Win,
 Pfeilen, Entf, Pos1/Ende, Bild auf/ab, F1–F12 und Strg+Alt+Entf;
-Modifikatoren bleiben bis zur nächsten Taste gedrückt.
+Modifikatoren bleiben bis zur nächsten Taste gedrückt. Standardmäßig liegt
+die Tastatur über dem Bild; „Bild über der Tastatur verkleinern“ (Menü in der
+Sitzung oder Einstellungen) verkleinert den entfernten Bildschirm stattdessen
+so, dass die Tastatur nichts verdeckt.
 
-**Werkzeugleiste** (oben, einklappbar): Tastatur, Eingabemodus,
-Menü (Esc, Tab, Windows-Taste, Strg+Alt+Entf, Zwischenablage senden, Bild
-neu laden, Nur ansehen), Zoom zurücksetzen, Trennen.
+**Scroll-Pad:** Der Knopf mit dem Doppelpfeil blendet ein schwebendes Pad ein
+(am Griff verschiebbar) mit vier Pfeiltasten, die beim Halten wiederholen,
+und einem Scrollstreifen: Ziehen scrollt an der Zeigerposition wie auf einem
+Touchscreen, Tippen auf die obere oder untere Hälfte scrollt eine Raste,
+Halten scrollt weiter. Zum Blättern am iPad ohne Tastatur und ohne
+Zwei-Finger-Geste.
+
+**Mehrere Bildschirme:** Meldet der Server die Anordnung seiner Bildschirme
+(VNC-Beach-Server, TigerVNC), erscheint ein Bildschirm-Knopf in der
+Werkzeugleiste: „Alle Bildschirme“ oder ein einzelner. Dann wird nur noch
+dieser angezeigt und vom Server angefordert.
+
+**Werkzeugleiste** (oben, einklappbar): Tastatur, Eingabemodus, Scroll-Pad,
+Bildschirm (bei mehreren), Menü (Esc, Tab, Windows-Taste, Strg+Alt+Entf,
+Zwischenablage senden, Bild neu laden, Bild über der Tastatur verkleinern,
+Nur ansehen), Zoom zurücksetzen, Trennen.
 
 **Zwischenablage:** Nach dem Verbinden und bei jeder Rückkehr zur App wird
 kopierter Text an den Rechner gesendet; vom Rechner kopierter Text landet

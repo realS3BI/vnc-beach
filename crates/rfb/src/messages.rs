@@ -29,6 +29,15 @@ pub enum ClientMessage {
         y: u16,
     },
     ClientCutText(String),
+    /// Request for a new framebuffer size and layout (sent by viewers that
+    /// saw an [`EXTENDED_DESKTOP_SIZE`](crate::encoding::EXTENDED_DESKTOP_SIZE)
+    /// rectangle). Servers that can't resize answer with status
+    /// [`DESKTOP_SIZE_PROHIBITED`].
+    SetDesktopSize {
+        width: u16,
+        height: u16,
+        screens: Vec<Screen>,
+    },
 }
 
 impl ClientMessage {
@@ -64,6 +73,19 @@ impl ClientMessage {
             6 => {
                 r.skip(3)?;
                 ClientMessage::ClientCutText(read_cut_text(r)?)
+            }
+            251 => {
+                r.skip(1)?;
+                let width = r.u16()?;
+                let height = r.u16()?;
+                let n = r.u8()?;
+                r.skip(1)?;
+                let screens = (0..n).map(|_| Screen::read(r)).collect::<Result<_>>()?;
+                ClientMessage::SetDesktopSize {
+                    width,
+                    height,
+                    screens,
+                }
             }
             t => return proto(format!("unknown client message type {t}")),
         })
@@ -108,10 +130,98 @@ impl ClientMessage {
                 b.extend_from_slice(&[6, 0, 0, 0]);
                 write_cut_text(&mut b, text)?;
             }
+            ClientMessage::SetDesktopSize {
+                width,
+                height,
+                screens,
+            } => {
+                b.extend_from_slice(&[251, 0]);
+                b.put_u16(*width)?;
+                b.put_u16(*height)?;
+                b.extend_from_slice(&[screens.len() as u8, 0]);
+                for s in screens {
+                    s.write(&mut b)?;
+                }
+            }
         }
         w.write_all(&b)?;
         Ok(())
     }
+}
+
+/// One physical display inside the framebuffer (ExtendedDesktopSize).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Screen {
+    pub id: u32,
+    pub x: u16,
+    pub y: u16,
+    pub width: u16,
+    pub height: u16,
+    pub flags: u32,
+}
+
+impl Screen {
+    pub fn read(r: &mut impl Read) -> Result<Self> {
+        Ok(Screen {
+            id: r.u32()?,
+            x: r.u16()?,
+            y: r.u16()?,
+            width: r.u16()?,
+            height: r.u16()?,
+            flags: r.u32()?,
+        })
+    }
+
+    pub fn write(&self, w: &mut impl Write) -> Result<()> {
+        w.put_u32(self.id)?;
+        for v in [self.x, self.y, self.width, self.height] {
+            w.put_u16(v)?;
+        }
+        w.put_u32(self.flags)?;
+        Ok(())
+    }
+}
+
+/// `x` of an ExtendedDesktopSize rectangle: why the layout is being sent.
+pub const DESKTOP_SIZE_REASON_SERVER: u16 = 0;
+pub const DESKTOP_SIZE_REASON_CLIENT: u16 = 1;
+pub const DESKTOP_SIZE_REASON_OTHER_CLIENT: u16 = 2;
+/// `y` of an ExtendedDesktopSize rectangle: the outcome of a request.
+pub const DESKTOP_SIZE_OK: u16 = 0;
+pub const DESKTOP_SIZE_PROHIBITED: u16 = 1;
+
+/// Writes an ExtendedDesktopSize rectangle (header and payload). The caller
+/// has already written the FramebufferUpdate header counting it.
+pub fn write_extended_desktop_size(
+    w: &mut impl Write,
+    reason: u16,
+    status: u16,
+    width: u16,
+    height: u16,
+    screens: &[Screen],
+) -> Result<()> {
+    let mut b = Vec::with_capacity(16 + screens.len() * 16);
+    Rect {
+        x: reason,
+        y: status,
+        width,
+        height,
+        encoding: crate::encoding::EXTENDED_DESKTOP_SIZE,
+    }
+    .write(&mut b)?;
+    b.extend_from_slice(&[screens.len() as u8, 0, 0, 0]);
+    for s in screens {
+        s.write(&mut b)?;
+    }
+    w.write_all(&b)?;
+    Ok(())
+}
+
+/// Reads the payload that follows an ExtendedDesktopSize rectangle header.
+pub fn read_screens(r: &mut impl Read) -> Result<Vec<Screen>> {
+    let n = r.u8()?;
+    r.skip(3)?;
+    (0..n).map(|_| Screen::read(r)).collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -249,6 +359,28 @@ mod tests {
                 y: 480,
             },
             ClientMessage::ClientCutText("Grüße".into()),
+            ClientMessage::SetDesktopSize {
+                width: 3000,
+                height: 1200,
+                screens: vec![
+                    Screen {
+                        id: 7,
+                        x: 0,
+                        y: 0,
+                        width: 1800,
+                        height: 1200,
+                        flags: 0,
+                    },
+                    Screen {
+                        id: 8,
+                        x: 1800,
+                        y: 100,
+                        width: 1200,
+                        height: 900,
+                        flags: 0,
+                    },
+                ],
+            },
         ];
         for m in msgs {
             let mut buf = Vec::new();
@@ -257,6 +389,54 @@ mod tests {
             assert_eq!(ClientMessage::read(&mut r).unwrap(), m);
             assert!(r.is_empty());
         }
+    }
+
+    #[test]
+    fn extended_desktop_size_roundtrip() {
+        let screens = [
+            Screen {
+                id: 1,
+                x: 0,
+                y: 0,
+                width: 2560,
+                height: 1440,
+                flags: 0,
+            },
+            Screen {
+                id: 2,
+                x: 2560,
+                y: 200,
+                width: 1920,
+                height: 1080,
+                flags: 0,
+            },
+        ];
+        let mut buf = Vec::new();
+        write_framebuffer_update_header(&mut buf, 1).unwrap();
+        write_extended_desktop_size(
+            &mut buf,
+            DESKTOP_SIZE_REASON_SERVER,
+            DESKTOP_SIZE_OK,
+            4480,
+            1440,
+            &screens,
+        )
+        .unwrap();
+        let mut r = &buf[..];
+        assert_eq!(ServerMessage::read(&mut r).unwrap(), ServerMessage::FramebufferUpdate { rects: 1 });
+        let rect = Rect::read(&mut r).unwrap();
+        assert_eq!(
+            rect,
+            Rect {
+                x: 0,
+                y: 0,
+                width: 4480,
+                height: 1440,
+                encoding: crate::encoding::EXTENDED_DESKTOP_SIZE,
+            }
+        );
+        assert_eq!(read_screens(&mut r).unwrap(), screens);
+        assert!(r.is_empty());
     }
 
     #[test]

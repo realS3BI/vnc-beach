@@ -8,6 +8,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.shortcutMappingKey) private var shortcutMapping = ShortcutMapping.auto.rawValue
     @AppStorage(AppSettings.clipboardSyncKey) private var clipboardSync = true
     @AppStorage(AppSettings.touchpadSpeedKey) private var touchpadSpeed = 1.0
+    @AppStorage(AppSettings.keyboardShrinksKey) private var keyboardShrinks = false
 
     var body: some View {
         NavigationStack {
@@ -49,6 +50,15 @@ struct SettingsView: View {
                     )
                 }
                 Section {
+                    Toggle("Bild über der Tastatur verkleinern", isOn: $keyboardShrinks)
+                } header: {
+                    Text("Tastatur")
+                } footer: {
+                    Text(
+                        "Eingeschaltet wird der entfernte Bildschirm so verkleinert, dass die Bildschirmtastatur nichts verdeckt. Ausgeschaltet liegt die Tastatur über dem Bild. Auch in der Sitzung über das Menü umschaltbar."
+                    )
+                }
+                Section {
                     Toggle("Zwischenablage abgleichen", isOn: $clipboardSync)
                 } footer: {
                     Text(
@@ -62,6 +72,7 @@ struct SettingsView: View {
                     gesture("Mit zwei Fingern wischen", "Scrollen")
                     gesture("Auf- und zuziehen", "Zoom")
                     gesture("Apple Pencil schweben", "Zeiger bewegen")
+                    gesture("Scroll-Pad (Werkzeugleiste)", "Pfeiltasten und Scrollstreifen")
                 }
                 Section("Über") {
                     Text("Version \(Self.version)")

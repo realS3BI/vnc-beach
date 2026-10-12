@@ -11,17 +11,25 @@ use std::time::Duration;
 use rfb::encoding;
 use rfb::handshake::client_handshake_with_banner;
 use rfb::io::ReadExt;
-use rfb::messages::{ClientMessage, Rect, ServerMessage};
+use rfb::messages::{self, ClientMessage, Rect, ServerMessage};
 use rfb::zrle::ZrleDecoder;
 use rfb::{Error, PixelFormat};
 
+pub use rfb::messages::Screen;
+
 /// Pixel rectangle `x, y, width, height`.
 pub type DirtyRect = [usize; 4];
+
+/// A rectangle `x, y, width, height` in framebuffer pixels.
+pub type Region = (usize, usize, usize, usize);
 
 pub struct Framebuffer {
     pub width: usize,
     pub height: usize,
     pub rgba: Vec<u8>,
+    /// The server's displays inside the framebuffer (ExtendedDesktopSize);
+    /// empty if the server didn't say.
+    pub screens: Vec<Screen>,
     /// Changed pixels since the last [`Framebuffer::take_dirty`], as
     /// `x0, y0, x1, y1` (exclusive).
     dirty: Option<[usize; 4]>,
@@ -33,6 +41,7 @@ impl Framebuffer {
             width,
             height,
             rgba: vec![0; width * height * 4],
+            screens: Vec::new(),
             dirty: Some([0, 0, width, height]),
         }
     }
@@ -60,7 +69,8 @@ impl Framebuffer {
 pub enum Event {
     /// New pixels are waiting in the framebuffer.
     Frame,
-    /// The remote desktop changed size; the framebuffer was reallocated.
+    /// The remote desktop changed size or display arrangement; the
+    /// framebuffer may have been reallocated.
     Resized,
     Clipboard(String),
     Closed(String),
@@ -97,6 +107,8 @@ pub struct Connection {
     pub name: String,
     pub remote: RemoteKind,
     pub fb: Arc<Mutex<Framebuffer>>,
+    /// The part of the framebuffer we ask updates for; `None` is all of it.
+    region: Arc<Mutex<Option<Region>>>,
     writer: Arc<Mutex<BufWriter<TcpStream>>>,
     stream: TcpStream,
 }
@@ -125,17 +137,20 @@ impl Connection {
             encoding::ZRLE,
             encoding::COPY_RECT,
             encoding::RAW,
+            encoding::EXTENDED_DESKTOP_SIZE,
             encoding::DESKTOP_SIZE,
         ])
         .write(&mut writer)?;
-        full_request(w, h, false).write(&mut writer)?;
+        request((0, 0, w, h), false).write(&mut writer)?;
         writer.flush()?;
 
         let writer = Arc::new(Mutex::new(writer));
+        let region = Arc::new(Mutex::new(None));
         let reader = Reader {
             input: BufReader::with_capacity(1 << 20, stream.try_clone()?),
             output: writer.clone(),
             fb: fb.clone(),
+            region: region.clone(),
             pf,
             zrle: ZrleDecoder::new(),
             on_event: Box::new(on_event),
@@ -148,6 +163,7 @@ impl Connection {
             name: init.name,
             remote,
             fb,
+            region,
             writer,
             stream,
         })
@@ -157,16 +173,36 @@ impl Connection {
         let _ = send(&self.writer, msgs);
     }
 
-    /// Asks for the whole screen again, e.g. after the app was suspended.
+    /// Asks for the shown region again, e.g. after the app was suspended.
     pub fn refresh(&self) {
         let (w, h) = self.size();
-        self.send(&[full_request(w, h, false)]);
+        let region = self.region.lock().unwrap().unwrap_or((0, 0, w, h));
+        self.send(&[request(region, false)]);
     }
 
     pub fn size(&self) -> (usize, usize) {
         let fb = self.fb.lock().unwrap();
         (fb.width, fb.height)
     }
+
+    pub fn screens(&self) -> Vec<Screen> {
+        self.fb.lock().unwrap().screens.clone()
+    }
+
+    /// Restricts updates to `region` (e.g. one display) and fetches it in
+    /// full. `None` goes back to the whole framebuffer.
+    pub fn set_region(&self, region: Option<Region>) {
+        let (w, h) = self.size();
+        let clipped = region.map(|r| clip(r, w, h)).filter(|r| r.2 > 0 && r.3 > 0);
+        *self.region.lock().unwrap() = clipped;
+        self.send(&[request(clipped.unwrap_or((0, 0, w, h)), false)]);
+    }
+}
+
+fn clip(r: Region, width: usize, height: usize) -> Region {
+    let x0 = r.0.min(width);
+    let y0 = r.1.min(height);
+    (x0, y0, (r.0 + r.2).min(width) - x0, (r.1 + r.3).min(height) - y0)
 }
 
 impl Drop for Connection {
@@ -226,11 +262,11 @@ fn send(writer: &Mutex<BufWriter<TcpStream>>, msgs: &[ClientMessage]) -> rfb::Re
     Ok(())
 }
 
-fn full_request(w: usize, h: usize, incremental: bool) -> ClientMessage {
+fn request((x, y, w, h): Region, incremental: bool) -> ClientMessage {
     ClientMessage::FramebufferUpdateRequest {
         incremental,
-        x: 0,
-        y: 0,
+        x: x as u16,
+        y: y as u16,
         width: w as u16,
         height: h as u16,
     }
@@ -240,6 +276,7 @@ struct Reader {
     input: BufReader<TcpStream>,
     output: Arc<Mutex<BufWriter<TcpStream>>>,
     fb: Arc<Mutex<Framebuffer>>,
+    region: Arc<Mutex<Option<Region>>>,
     pf: PixelFormat,
     zrle: ZrleDecoder,
     on_event: Box<dyn Fn(Event) + Send>,
@@ -274,7 +311,8 @@ impl Reader {
                         (self.on_event)(Event::Resized);
                     }
                     (self.on_event)(Event::Frame);
-                    send(&self.output, &[full_request(w, h, true)])?;
+                    let region = self.region.lock().unwrap().unwrap_or((0, 0, w, h));
+                    send(&self.output, &[request(region, true)])?;
                 }
                 ServerMessage::ServerCutText(text) => (self.on_event)(Event::Clipboard(text)),
                 ServerMessage::Bell | ServerMessage::SetColourMapEntries => {}
@@ -282,11 +320,30 @@ impl Reader {
         }
     }
 
-    /// Applies one rectangle; returns whether it changed the desktop size.
+    /// Applies one rectangle; returns whether it changed the desktop size
+    /// or layout.
     fn apply(&mut self, r: Rect) -> rfb::Result<bool> {
         let (x, y, w, h) = (r.x as usize, r.y as usize, r.width as usize, r.height as usize);
         if r.encoding == encoding::DESKTOP_SIZE {
             *self.fb.lock().unwrap() = Framebuffer::new(w, h);
+            *self.region.lock().unwrap() = None;
+            return Ok(true);
+        }
+        if r.encoding == encoding::EXTENDED_DESKTOP_SIZE {
+            let screens = messages::read_screens(&mut self.input)?;
+            // `x` is the reason, `y` the status of a request. A refused
+            // request keeps the old size; only a success changes anything.
+            if r.y != messages::DESKTOP_SIZE_OK {
+                return Ok(false);
+            }
+            let mut fb = self.fb.lock().unwrap();
+            if (w, h) != (fb.width, fb.height) {
+                *fb = Framebuffer::new(w, h);
+            } else if fb.screens == screens {
+                return Ok(false);
+            }
+            fb.screens = screens;
+            *self.region.lock().unwrap() = None;
             return Ok(true);
         }
         {

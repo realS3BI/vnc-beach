@@ -216,6 +216,63 @@ pub unsafe extern "C" fn beach_session_take_frame(
     true
 }
 
+/// One of the server's displays inside the framebuffer.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct BeachScreen {
+    pub id: u32,
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Copies up to `max` displays into `out` and returns how many the server
+/// has (0 if it didn't say). Query again after `BEACH_EVENT_RESIZED`.
+///
+/// # Safety
+/// `out` must have room for `max` entries (or be NULL with `max` 0).
+#[no_mangle]
+pub unsafe extern "C" fn beach_session_screens(session: *mut BeachSession, out: *mut BeachScreen, max: usize) -> usize {
+    let Some(s) = (unsafe { with(session) }) else {
+        return 0;
+    };
+    let screens = s.conn.screens();
+    if !out.is_null() {
+        for (i, screen) in screens.iter().take(max).enumerate() {
+            unsafe {
+                *out.add(i) = BeachScreen {
+                    id: screen.id,
+                    x: screen.x as u32,
+                    y: screen.y as u32,
+                    width: screen.width as u32,
+                    height: screen.height as u32,
+                };
+            }
+        }
+    }
+    screens.len()
+}
+
+/// Asks the server only for `x, y, width, height` from now on (one display)
+/// and fetches it in full. `width` or `height` 0 goes back to everything.
+///
+/// # Safety
+/// `session` must be a live session.
+#[no_mangle]
+pub unsafe extern "C" fn beach_session_set_region(
+    session: *mut BeachSession,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+) {
+    if let Some(s) = unsafe { with(session) } {
+        let region = (width > 0 && height > 0).then_some((x as usize, y as usize, width as usize, height as usize));
+        s.conn.set_region(region);
+    }
+}
+
 /// Sends a pointer event. `buttons` is the RFB button mask (bit 0 left,
 /// bit 1 middle, bit 2 right, bits 3–6 wheel up/down/left/right).
 ///

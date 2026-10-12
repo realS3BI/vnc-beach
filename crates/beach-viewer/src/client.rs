@@ -9,9 +9,14 @@ use std::time::Duration;
 use rfb::encoding;
 use rfb::handshake::client_handshake_with_banner;
 use rfb::io::ReadExt;
-use rfb::messages::{ClientMessage, Rect, ServerMessage};
+use rfb::messages::{self, ClientMessage, Rect, ServerMessage};
 use rfb::zrle::ZrleDecoder;
 use rfb::{Error, PixelFormat};
+
+pub use rfb::messages::Screen;
+
+/// A rectangle `x, y, width, height` in framebuffer pixels.
+pub type Region = (usize, usize, usize, usize);
 
 pub struct Framebuffer {
     pub width: usize,
@@ -19,6 +24,21 @@ pub struct Framebuffer {
     pub rgba: Vec<u8>,
     /// Bumped on every change, so the UI knows when to re-upload.
     pub generation: u64,
+    /// The server's displays inside the framebuffer (ExtendedDesktopSize);
+    /// empty if the server didn't say.
+    pub screens: Vec<Screen>,
+}
+
+impl Framebuffer {
+    fn new(width: usize, height: usize, generation: u64, screens: Vec<Screen>) -> Self {
+        Framebuffer {
+            width,
+            height,
+            rgba: vec![0; width * height * 4],
+            generation,
+            screens,
+        }
+    }
 }
 
 pub enum Notice {
@@ -49,6 +69,8 @@ pub struct Connection {
     pub remote: RemoteKind,
     pub fb: Arc<Mutex<Framebuffer>>,
     pub notices: Receiver<Notice>,
+    /// The part of the framebuffer we ask updates for; `None` is all of it.
+    region: Arc<Mutex<Option<Region>>>,
     writer: Arc<Mutex<BufWriter<TcpStream>>>,
     stream: TcpStream,
 }
@@ -70,30 +92,28 @@ impl Connection {
         stream.set_read_timeout(None)?;
 
         let (w, h) = (init.width as usize, init.height as usize);
-        let fb = Arc::new(Mutex::new(Framebuffer {
-            width: w,
-            height: h,
-            rgba: vec![0; w * h * 4],
-            generation: 0,
-        }));
+        let fb = Arc::new(Mutex::new(Framebuffer::new(w, h, 0, Vec::new())));
         let mut writer = BufWriter::new(stream.try_clone()?);
         ClientMessage::SetPixelFormat(pf).write(&mut writer)?;
         ClientMessage::SetEncodings(vec![
             encoding::ZRLE,
             encoding::COPY_RECT,
             encoding::RAW,
+            encoding::EXTENDED_DESKTOP_SIZE,
             encoding::DESKTOP_SIZE,
         ])
         .write(&mut writer)?;
-        full_request(w, h, false).write(&mut writer)?;
+        request((0, 0, w, h), false).write(&mut writer)?;
         writer.flush()?;
 
         let writer = Arc::new(Mutex::new(writer));
+        let region = Arc::new(Mutex::new(None));
         let (tx, notices) = channel();
         let reader = Reader {
             input: BufReader::with_capacity(1 << 20, stream.try_clone()?),
             output: writer.clone(),
             fb: fb.clone(),
+            region: region.clone(),
             pf,
             zrle: ZrleDecoder::new(),
             notices: tx,
@@ -108,6 +128,7 @@ impl Connection {
             remote,
             fb,
             notices,
+            region,
             writer,
             stream,
         })
@@ -118,6 +139,24 @@ impl Connection {
             log::debug!("send failed: {e}");
         }
     }
+
+    /// Restricts updates to `region` (e.g. one display) and fetches it in
+    /// full. `None` goes back to the whole framebuffer.
+    pub fn set_region(&self, region: Option<Region>) {
+        let (w, h) = {
+            let fb = self.fb.lock().unwrap();
+            (fb.width, fb.height)
+        };
+        let clipped = region.map(|r| clip(r, w, h)).filter(|r| r.2 > 0 && r.3 > 0);
+        *self.region.lock().unwrap() = clipped;
+        self.send(&[request(clipped.unwrap_or((0, 0, w, h)), false)]);
+    }
+}
+
+fn clip(r: Region, width: usize, height: usize) -> Region {
+    let x0 = r.0.min(width);
+    let y0 = r.1.min(height);
+    (x0, y0, (r.0 + r.2).min(width) - x0, (r.1 + r.3).min(height) - y0)
 }
 
 impl Drop for Connection {
@@ -188,11 +227,11 @@ fn send(writer: &Mutex<BufWriter<TcpStream>>, msgs: &[ClientMessage]) -> rfb::Re
     Ok(())
 }
 
-fn full_request(w: usize, h: usize, incremental: bool) -> ClientMessage {
+fn request((x, y, w, h): Region, incremental: bool) -> ClientMessage {
     ClientMessage::FramebufferUpdateRequest {
         incremental,
-        x: 0,
-        y: 0,
+        x: x as u16,
+        y: y as u16,
         width: w as u16,
         height: h as u16,
     }
@@ -202,6 +241,7 @@ struct Reader {
     input: BufReader<TcpStream>,
     output: Arc<Mutex<BufWriter<TcpStream>>>,
     fb: Arc<Mutex<Framebuffer>>,
+    region: Arc<Mutex<Option<Region>>>,
     pf: PixelFormat,
     zrle: ZrleDecoder,
     notices: Sender<Notice>,
@@ -235,7 +275,8 @@ impl Reader {
                         (fb.width, fb.height)
                     };
                     (self.repaint)();
-                    send(&self.output, &[full_request(w, h, true)])?;
+                    let region = self.region.lock().unwrap().unwrap_or((0, 0, w, h));
+                    send(&self.output, &[request(region, true)])?;
                 }
                 ServerMessage::ServerCutText(text) => {
                     let _ = self.notices.send(Notice::Clipboard(text));
@@ -250,12 +291,25 @@ impl Reader {
         let (x, y, w, h) = (r.x as usize, r.y as usize, r.width as usize, r.height as usize);
         if r.encoding == encoding::DESKTOP_SIZE {
             let mut fb = self.fb.lock().unwrap();
-            *fb = Framebuffer {
-                width: w,
-                height: h,
-                rgba: vec![0; w * h * 4],
-                generation: fb.generation,
-            };
+            *fb = Framebuffer::new(w, h, fb.generation, Vec::new());
+            *self.region.lock().unwrap() = None;
+            return Ok(());
+        }
+        if r.encoding == encoding::EXTENDED_DESKTOP_SIZE {
+            let screens = messages::read_screens(&mut self.input)?;
+            // `x` is the reason, `y` the status of a request. A refused
+            // request keeps the old size; only a success changes anything.
+            if r.y != messages::DESKTOP_SIZE_OK {
+                return Ok(());
+            }
+            let mut fb = self.fb.lock().unwrap();
+            if (w, h) != (fb.width, fb.height) {
+                *fb = Framebuffer::new(w, h, fb.generation, screens);
+                *self.region.lock().unwrap() = None;
+            } else if fb.screens != screens {
+                fb.screens = screens;
+                *self.region.lock().unwrap() = None;
+            }
             return Ok(());
         }
         {

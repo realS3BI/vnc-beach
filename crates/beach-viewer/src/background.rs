@@ -230,12 +230,18 @@ impl Tray {
             &items.quit,
         ])?;
         let image = icon::tray();
-        let icon = TrayIconBuilder::new()
+        let image = tray_icon::Icon::from_rgba(image.rgba, image.width, image.height)?;
+        let builder = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
             .with_tooltip("VNC Beach")
-            .with_icon(tray_icon::Icon::from_rgba(image.rgba, image.width, image.height)?)
-            .with_menu_on_left_click(false)
-            .build()?;
+            .with_menu_on_left_click(false);
+        // On macOS the icon is a template image: the menu bar tints it for
+        // the light, dark and clicked states.
+        #[cfg(target_os = "macos")]
+        let builder = builder.with_icon_templated(image);
+        #[cfg(not(target_os = "macos"))]
+        let builder = builder.with_icon(image);
+        let icon = builder.build()?;
         self.icon = Some(icon);
         self.items = Some(items);
         self.refresh();

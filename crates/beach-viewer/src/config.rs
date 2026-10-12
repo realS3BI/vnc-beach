@@ -14,6 +14,7 @@
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 
+use beach_server::Display;
 use serde::{Deserialize, Serialize};
 
 use crate::servers::{self, config_dir};
@@ -39,10 +40,39 @@ pub struct ServerConfig {
     #[serde(with = "servers::obfuscated")]
     pub password: String,
     pub view_only: bool,
-    /// Display index as listed by `beach-server --list-displays`; `None` is
-    /// the primary one.
-    pub display: Option<usize>,
+    /// `"all"` (default), `"primary"` or an index as listed by
+    /// `beach-server --list-displays`.
+    #[serde(with = "display_toml")]
+    pub display: Display,
     pub fps: u32,
+}
+
+/// `display = "all"`, `display = "primary"` or `display = 1`.
+mod display_toml {
+    use beach_server::Display;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(untagged)]
+    enum Repr {
+        Index(usize),
+        Name(String),
+    }
+
+    pub fn serialize<S: Serializer>(d: &Display, s: S) -> Result<S::Ok, S::Error> {
+        match *d {
+            Display::Index(i) => Repr::Index(i),
+            other => Repr::Name(other.to_string()),
+        }
+        .serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Display, D::Error> {
+        Ok(match Repr::deserialize(d)? {
+            Repr::Index(i) => Display::Index(i),
+            Repr::Name(name) => name.parse().map_err(serde::de::Error::custom)?,
+        })
+    }
 }
 
 impl Default for ServerConfig {
@@ -53,7 +83,7 @@ impl Default for ServerConfig {
             port: 5900,
             password: String::new(),
             view_only: false,
-            display: None,
+            display: Display::All,
             fps: 60,
         }
     }
@@ -124,5 +154,18 @@ mod tests {
         assert!(!text.contains("geheim"), "{text}");
         assert_eq!(load_from(Some(&path)), config);
         fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn display_choice_in_toml() {
+        let mut config = Config::default();
+        assert!(toml::to_string(&config).unwrap().contains("display = \"all\""));
+        config.server.display = Display::Index(1);
+        let text = toml::to_string(&config).unwrap();
+        assert!(text.contains("display = 1"), "{text}");
+        assert_eq!(toml::from_str::<Config>(&text).unwrap(), config);
+        let parsed: Config = toml::from_str("[server]\ndisplay = \"primary\"").unwrap();
+        assert_eq!(parsed.server.display, Display::Primary);
+        assert!(toml::from_str::<Config>("[server]\ndisplay = \"left\"").is_err());
     }
 }

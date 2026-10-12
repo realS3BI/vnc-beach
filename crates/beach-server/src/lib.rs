@@ -17,14 +17,16 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 
+pub use capture::{Display, Layout, ScreenRect};
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Options {
     pub bind: String,
     pub port: u16,
     /// `None` accepts viewers without a password.
     pub password: Option<String>,
-    /// Display index (see [`displays`]); `None` is the primary one.
-    pub display: Option<usize>,
+    /// Which displays to share; all of them by default.
+    pub display: Display,
     pub fps: u32,
     pub view_only: bool,
     /// Desktop name shown to viewers; defaults to `VNC Beach @ hostname
@@ -39,7 +41,7 @@ impl Default for Options {
             bind: "0.0.0.0".into(),
             port: 5900,
             password: None,
-            display: None,
+            display: Display::All,
             fps: 60,
             view_only: false,
             name: None,
@@ -70,7 +72,7 @@ impl Server {
         let input = if opts.view_only {
             None
         } else {
-            match input::Input::start(screen.geometry()) {
+            match input::Input::start() {
                 Ok(input) => Some(input),
                 Err(e) => {
                     log::warn!("sharing without keyboard and mouse: {e:#}");

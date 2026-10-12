@@ -13,6 +13,7 @@ mod keys;
 mod server_panel;
 mod servers;
 mod settings;
+mod theme;
 mod update;
 
 use clap::Parser;

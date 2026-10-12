@@ -42,6 +42,13 @@ struct SessionScreen: View {
                 toolbar
                 Spacer()
             }
+            if controller.scrollPadVisible, session.state == .connected {
+                ScrollPadView(controller: controller)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(.trailing, 24)
+                    .padding(.bottom, 32)
+                    .transition(.scale.combined(with: .opacity))
+            }
         }
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
@@ -88,6 +95,25 @@ struct SessionScreen: View {
                     }
                     .pickerStyle(.menu)
                     .labelsHidden()
+                    Button {
+                        withAnimation(.snappy) { controller.scrollPadVisible.toggle() }
+                    } label: {
+                        Image(systemName: controller.scrollPadVisible ? "arrow.up.and.down.square.fill" : "arrow.up.and.down.square")
+                    }
+                    .help("Scroll-Pad")
+                    if session.screens.count > 1 {
+                        Menu {
+                            Picker("Bildschirm", selection: screenSelection) {
+                                Text("Alle Bildschirme").tag(-1)
+                                ForEach(session.screens) { screen in
+                                    Text(screen.label).tag(screen.id)
+                                }
+                            }
+                        } label: {
+                            Image(systemName: session.selectedScreen == nil ? "rectangle.on.rectangle" : "rectangle.inset.filled")
+                        }
+                        .help("Bildschirm")
+                    }
                     Menu {
                         Button("Esc") { controller.type(Keysym.escape) }
                         Button("Tab") { controller.type(Keysym.tab) }
@@ -97,6 +123,7 @@ struct SessionScreen: View {
                         Button("Zwischenablage senden") { sendPasteboard(force: true) }
                         Button("Bild neu laden") { session.refresh() }
                         Divider()
+                        Toggle("Bild über der Tastatur verkleinern", isOn: $controller.keyboardShrinks)
                         Toggle("Nur ansehen", isOn: $controller.viewOnly)
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -133,6 +160,13 @@ struct SessionScreen: View {
         .tint(.primary)
         .background(.regularMaterial, in: Capsule())
         .padding(.top, 6)
+    }
+
+    /// -1 stands for "all displays"; the picker can't hold an optional.
+    private var screenSelection: Binding<Int> {
+        Binding(
+            get: { session.selectedScreen ?? -1 },
+            set: { session.selectScreen($0 < 0 ? nil : $0) })
     }
 
     private func closedView(_ reason: String) -> some View {

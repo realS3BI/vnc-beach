@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Generates the VNC Beach logo and icons from a few shapes.
 
-Writes assets/icon.svg (app icon), assets/logo.svg (icon + wordmark) and,
-with --raster, PNGs and ICOs via macOS QuickLook (qlmanage) and sips.
+Writes assets/icon.svg (app icon), assets/logo.svg (icon + wordmark),
+assets/tray.svg (menu bar template image) and, with --raster, PNGs and ICOs
+via tools/render-svg.swift (AppKit) and sips.
 """
 import math
 import os
@@ -15,6 +16,7 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ASSETS = os.path.join(ROOT, "assets")
 DOCS = os.path.join(ROOT, "docs")
+RENDER = os.path.join(ROOT, "tools", "render-svg.swift")
 
 SKY_TOP, SKY_BOTTOM = "#8EDDFB", "#3FB4E6"
 SEA_TOP, SEA_BOTTOM = "#1E97CC", "#0E5F8F"
@@ -90,19 +92,44 @@ def logo_svg():
 """
 
 
+def tray_svg():
+    """Menu bar extra for macOS: a template image, so only the alpha channel counts.
+
+    The artwork is 18×18 pt in a 22×22 pt canvas (the menu bar's working area);
+    the raster step crops it to 18×22 pt. A solid umbrella with a scalloped hem,
+    tilted like the app icon, and a small wave, in the weight of Apple's own
+    menu bar glyphs.
+    """
+    cx, cy, r, tilt = 10.4, 9.6, 7.0, 25
+    scallops, depth = 4, 0.9
+    canopy = f"M{cx - r},{cy} A{r},{r} 0 0 1 {cx + r},{cy}"
+    w = 2 * r / scallops
+    for i in range(scallops):
+        canopy += f" A{w / 2:.3f},{depth} 0 0 1 {cx + r - (i + 1) * w:.3f},{cy}"
+    # Wave: two periods of quadratic arcs along y=20, amplitude 0.6.
+    x0, x1, y, amp, periods = 10.4, 19.3, 20.0, 0.6, 2
+    seg = (x1 - x0) / (periods * 2)
+    wave = f"M{x0},{y}"
+    for i in range(periods * 2):
+        wave += f" q{seg / 2:.3f},{(-amp if i % 2 == 0 else amp) * 2:.3f} {seg:.3f},0"
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22" width="22" height="22">
+<g fill="black">
+<g transform="rotate({tilt} {cx} {cy})">
+<line x1="{cx}" y1="{cy - r - 0.6}" x2="{cx}" y2="{cy + 9.2}" stroke="black" stroke-width="1.5" stroke-linecap="round"/>
+<path d="{canopy} Z"/>
+</g>
+<path d="{wave}" fill="none" stroke="black" stroke-width="1.3" stroke-linecap="round"/>
+</g>
+</svg>
+"""
+
+
 def render_png(svg_path, out_png, size, square=True):
-    """SVG → PNG via QuickLook (longest side = size)."""
-    with tempfile.TemporaryDirectory() as tmp:
-        subprocess.run(["qlmanage", "-t", "-s", str(size), "-o", tmp, svg_path],
-                       check=True, capture_output=True)
-        produced = os.path.join(tmp, os.path.basename(svg_path) + ".png")
-        shutil.copy(produced, out_png)
-    if square:
-        subprocess.run(["sips", "-z", str(size), str(size), out_png], check=True, capture_output=True)
-    else:
+    """SVG → PNG (size × size pixels, transparent background) via AppKit."""
+    subprocess.run(["swift", RENDER, svg_path, out_png, str(size), str(size)], check=True)
+    if not square:
         # The SVG is a square canvas with the artwork centred: crop the band.
         w, h = band_size(svg_path)
-        subprocess.run(["sips", "-z", str(size), str(size), out_png], check=True, capture_output=True)
         subprocess.run(["sips", "-c", str(round(size * h / w)), str(size), out_png],
                        check=True, capture_output=True)
 
@@ -151,6 +178,8 @@ def main():
     icon = os.path.join(ASSETS, "icon.svg")
     open(icon, "w").write(icon_svg())
     open(os.path.join(ASSETS, "logo.svg"), "w").write(logo_svg())
+    tray = os.path.join(ASSETS, "tray.svg")
+    open(tray, "w").write(tray_svg())
     open(os.path.join(DOCS, "favicon.svg"), "w").write(icon_svg())
     if "--raster" not in sys.argv:
         return
@@ -170,6 +199,11 @@ def main():
     write_icns(master, os.path.join(ASSETS, "icon.icns"))
     resize_png(master, os.path.join(DOCS, "apple-touch-icon.png"), 180)
     render_png(os.path.join(ASSETS, "logo.svg"), os.path.join(DOCS, "logo.png"), 1700, square=False)
+    # Menu bar template image at 2x: 44 px tall so tray-icon shows it at 22 pt
+    # (its cap, so the bitmap maps 1:1 to Retina pixels), cropped to 18 pt wide.
+    template = os.path.join(ASSETS, "tray-template.png")
+    render_png(tray, template, 44)
+    subprocess.run(["sips", "-c", "44", "36", template], check=True, capture_output=True)
 
 
 if __name__ == "__main__":

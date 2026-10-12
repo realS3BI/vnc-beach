@@ -30,6 +30,15 @@ enum {
 // only valid during the call.
 typedef void (*BeachEventCallback)(void *context, int32_t kind, const char *text);
 
+// One of the server's displays inside the framebuffer.
+typedef struct BeachScreen {
+    uint32_t id;
+    uint32_t x;
+    uint32_t y;
+    uint32_t width;
+    uint32_t height;
+} BeachScreen;
+
 typedef void (*BeachFrameCallback)(void *context, const uint8_t *rgba, uint32_t width, uint32_t height,
                                    uint32_t dirty_x, uint32_t dirty_y, uint32_t dirty_width,
                                    uint32_t dirty_height);
@@ -42,6 +51,8 @@ void beach_session_name(BeachSession *session, char *buf, size_t len);
 int32_t beach_session_remote_kind(BeachSession *session);
 void beach_session_size(BeachSession *session, uint32_t *width, uint32_t *height);
 bool beach_session_take_frame(BeachSession *session, BeachFrameCallback callback, void *context);
+size_t beach_session_screens(BeachSession *session, BeachScreen *out, size_t max);
+void beach_session_set_region(BeachSession *session, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
 void beach_session_pointer(BeachSession *session, uint8_t buttons, uint16_t x, uint16_t y);
 void beach_session_wheel(BeachSession *session, uint8_t buttons, uint8_t wheel_bit, uint16_t x, uint16_t y);
 void beach_session_key(BeachSession *session, uint32_t keysym, bool down);

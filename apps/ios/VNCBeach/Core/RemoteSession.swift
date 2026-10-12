@@ -10,6 +10,15 @@ struct DirtyRect {
     var height: Int
 }
 
+/// One of the server's displays inside the framebuffer.
+struct RemoteScreen: Identifiable, Equatable {
+    /// Position in the list; the server's own ids need not be unique.
+    let id: Int
+    let rect: CGRect
+
+    var label: String { "Bildschirm \(id + 1) (\(Int(rect.width))×\(Int(rect.height)))" }
+}
+
 /// Owns one RFB connection from `crates/beach-mobile` and republishes its
 /// events on the main actor.
 @Observable
@@ -26,6 +35,10 @@ final class RemoteSession {
     private(set) var name = ""
     private(set) var remote = RemoteKind.other
     private(set) var size = CGSize.zero
+    /// The server's displays, if it announced them (ExtendedDesktopSize).
+    private(set) var screens: [RemoteScreen] = []
+    /// Index into `screens` of the display shown alone; nil shows all.
+    private(set) var selectedScreen: Int?
     /// Set by the view: new pixels are waiting.
     var onFrame: (() -> Void)?
     var onClipboard: ((String) -> Void)?
@@ -69,6 +82,7 @@ final class RemoteSession {
             name = cString(buffer)
             remote = RemoteKind(rawValue: Int(beach_session_remote_kind(handle.pointer))) ?? .other
             refreshSize()
+            refreshScreens()
             state = .connected
         case .failed(let message):
             Unmanaged<CallbackBox>.fromOpaque(context.raw).release()
@@ -137,12 +151,51 @@ final class RemoteSession {
         beach_session_refresh(handle.pointer)
     }
 
+    /// The part of the framebuffer on show: one display or all of it.
+    var crop: CGRect {
+        if let i = selectedScreen, i < screens.count {
+            return screens[i].rect
+        }
+        return CGRect(origin: .zero, size: size)
+    }
+
+    /// Shows one display alone (nil: all of them) and asks the server for
+    /// just that part from now on.
+    func selectScreen(_ index: Int?) {
+        guard let handle else { return }
+        let index = index.flatMap { $0 < screens.count ? $0 : nil }
+        selectedScreen = index
+        if let index {
+            let r = screens[index].rect
+            beach_session_set_region(
+                handle.pointer, UInt32(r.minX), UInt32(r.minY), UInt32(r.width), UInt32(r.height))
+        } else {
+            beach_session_set_region(handle.pointer, 0, 0, 0, 0)
+        }
+    }
+
+    private func refreshScreens() {
+        guard let handle else { return }
+        let count = beach_session_screens(handle.pointer, nil, 0)
+        var buffer = [BeachScreen](repeating: BeachScreen(), count: max(count, 1))
+        let got = count == 0 ? 0 : beach_session_screens(handle.pointer, &buffer, buffer.count)
+        let fresh = buffer.prefix(got).enumerated().map { i, s in
+            RemoteScreen(
+                id: i, rect: CGRect(x: Int(s.x), y: Int(s.y), width: Int(s.width), height: Int(s.height)))
+        }
+        guard fresh != screens else { return }
+        screens = fresh
+        // The library drops its region when the layout changes: choose again.
+        selectScreen(selectedScreen)
+    }
+
     fileprivate func handle(kind: Int32, text: String?) {
         switch Int(kind) {
         case BEACH_EVENT_FRAME:
             onFrame?()
         case BEACH_EVENT_RESIZED:
             refreshSize()
+            refreshScreens()
         case BEACH_EVENT_CLIPBOARD:
             if let text {
                 onClipboard?(text)

@@ -31,12 +31,20 @@ final class RemoteScreenView: UIView {
     var remote = RemoteKind.other
     var touchpadSpeed: CGFloat = 1
     var onViewportChange: ((CGFloat) -> Void)?
+    /// Keep the image above the software keyboard instead of under it.
+    var shrinkForKeyboard = false {
+        didSet { if oldValue != shrinkForKeyboard { setNeedsLayout() } }
+    }
 
     // Viewport: the remote image is drawn `scale` points per remote pixel,
-    // with its top-left corner at `origin`.
+    // with its top-left corner at `origin`. Only `crop` (one display or the
+    // whole framebuffer) is shown; pointer coordinates are framebuffer pixels.
     private(set) var zoom: CGFloat = 1
     private var origin = CGPoint.zero
     private var fbSize = CGSize(width: 1, height: 1)
+    private var crop = CGRect(x: 0, y: 0, width: 1, height: 1)
+    /// Points at the bottom hidden by the software keyboard.
+    private var keyboardOverlap: CGFloat = 0
     private var pinchCommitted = false
     private var pinchLastScale: CGFloat = 1
     private var pinchLastCenter = CGPoint.zero
@@ -85,10 +93,45 @@ final class RemoteScreenView: UIView {
         addInteraction(UIPointerInteraction(delegate: self))
         session.onFrame = { [weak self] in self?.metalView.setNeedsDisplay() }
         fbSize = session.size == .zero ? CGSize(width: 1, height: 1) : session.size
-        pointer = CGPoint(x: fbSize.width / 2, y: fbSize.height / 2)
+        crop = session.crop.isEmpty ? CGRect(origin: .zero, size: fbSize) : session.crop
+        pointer = CGPoint(x: crop.midX, y: crop.midY)
+        observeKeyboard()
     }
 
     required init?(coder: NSCoder) { fatalError("not supported") }
+
+    /// Selector-based observers unregister themselves when the view dies.
+    private func observeKeyboard() {
+        let center = NotificationCenter.default
+        for name in [UIResponder.keyboardWillChangeFrameNotification, UIResponder.keyboardWillHideNotification] {
+            center.addObserver(self, selector: #selector(keyboardNotification(_:)), name: name, object: nil)
+        }
+    }
+
+    /// Keyboard notifications arrive on the main thread.
+    @objc private func keyboardNotification(_ note: Notification) {
+        let end = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+        let hiding = note.name == UIResponder.keyboardWillHideNotification
+        keyboardFrameChanged(to: hiding ? nil : end)
+    }
+
+    /// `frame` is in screen coordinates; nil means the keyboard is gone.
+    private func keyboardFrameChanged(to frame: CGRect?) {
+        var overlap: CGFloat = 0
+        if let frame, let window {
+            let keyboard = window.convert(frame, from: nil)
+            let mine = convert(bounds, to: window)
+            // A floating or split iPad keyboard doesn't take the bottom.
+            let docked = keyboard.width >= window.bounds.width * 0.6
+            if docked {
+                overlap = max(0, min(mine.maxY, window.bounds.maxY) - max(keyboard.minY, mine.minY))
+            }
+        }
+        if overlap != keyboardOverlap {
+            keyboardOverlap = overlap
+            setNeedsLayout()
+        }
+    }
 
     private func setupMetal() {
         metalView.isPaused = true
@@ -181,35 +224,51 @@ final class RemoteScreenView: UIView {
         super.layoutSubviews()
         metalView.frame = bounds
         renderer?.contentScale = window?.screen.scale ?? traitCollection.displayScale
-        if session.size != .zero, session.size != fbSize {
+        let shown = session.crop.isEmpty ? CGRect(origin: .zero, size: session.size) : session.crop
+        if session.size != .zero, session.size != fbSize || shown != crop {
             fbSize = session.size
+            crop = shown
             zoom = 1
+            if !crop.contains(pointer) {
+                pointer = CGPoint(x: crop.midX, y: crop.midY)
+            }
         }
         layoutViewport()
     }
 
-    /// Remote size changed (DesktopSize); called by the representable.
+    /// Remote size or display choice changed; called by the representable.
     func remoteSizeChanged() {
         setNeedsLayout()
     }
 
+    /// The area the image is laid out in: everything, or what the keyboard
+    /// leaves free.
+    private var viewport: CGRect {
+        guard shrinkForKeyboard, keyboardOverlap > 0 else { return bounds }
+        return CGRect(x: 0, y: 0, width: bounds.width, height: max(bounds.height - keyboardOverlap, 1))
+    }
+
     private var fitScale: CGFloat {
-        min(bounds.width / fbSize.width, bounds.height / fbSize.height)
+        min(viewport.width / crop.width, viewport.height / crop.height)
     }
 
     private var scale: CGFloat { fitScale * zoom }
 
     private var imageSize: CGSize {
-        CGSize(width: fbSize.width * scale, height: fbSize.height * scale)
+        CGSize(width: crop.width * scale, height: crop.height * scale)
     }
 
     private func layoutViewport() {
         let image = imageSize
-        origin.x = image.width <= bounds.width
-            ? (bounds.width - image.width) / 2 : min(0, max(bounds.width - image.width, origin.x))
-        origin.y = image.height <= bounds.height
-            ? (bounds.height - image.height) / 2 : min(0, max(bounds.height - image.height, origin.y))
+        let area = viewport
+        origin.x = image.width <= area.width
+            ? (area.width - image.width) / 2 : min(0, max(area.width - image.width, origin.x))
+        origin.y = image.height <= area.height
+            ? (area.height - image.height) / 2 : min(0, max(area.height - image.height, origin.y))
         renderer?.imageRect = CGRect(origin: origin, size: image)
+        renderer?.uvRect = CGRect(
+            x: crop.minX / fbSize.width, y: crop.minY / fbSize.height,
+            width: crop.width / fbSize.width, height: crop.height / fbSize.height)
         metalView.setNeedsDisplay()
         updateCursorLayer()
         onViewportChange?(zoom)
@@ -220,25 +279,31 @@ final class RemoteScreenView: UIView {
         layoutViewport()
     }
 
+    /// View point → framebuffer pixel, clamped to the shown display.
     private func remotePoint(from p: CGPoint) -> CGPoint {
+        clampToCrop(CGPoint(x: crop.minX + (p.x - origin.x) / scale, y: crop.minY + (p.y - origin.y) / scale))
+    }
+
+    private func clampToCrop(_ p: CGPoint) -> CGPoint {
         CGPoint(
-            x: min(max((p.x - origin.x) / scale, 0), fbSize.width - 1),
-            y: min(max((p.y - origin.y) / scale, 0), fbSize.height - 1))
+            x: min(max(p.x, crop.minX), crop.maxX - 1),
+            y: min(max(p.y, crop.minY), crop.maxY - 1))
     }
 
     private func viewPoint(from p: CGPoint) -> CGPoint {
-        CGPoint(x: origin.x + p.x * scale, y: origin.y + p.y * scale)
+        CGPoint(x: origin.x + (p.x - crop.minX) * scale, y: origin.y + (p.y - crop.minY) * scale)
     }
 
     /// Keeps the cursor in view when zoomed in.
     private func followCursor() {
         guard zoom > 1 else { return }
         let p = viewPoint(from: pointer)
+        let area = viewport
         let margin: CGFloat = 48
         if p.x < margin { origin.x += margin - p.x }
-        if p.x > bounds.width - margin { origin.x -= p.x - (bounds.width - margin) }
+        if p.x > area.width - margin { origin.x -= p.x - (area.width - margin) }
         if p.y < margin { origin.y += margin - p.y }
-        if p.y > bounds.height - margin { origin.y -= p.y - (bounds.height - margin) }
+        if p.y > area.height - margin { origin.y -= p.y - (area.height - margin) }
         layoutViewport()
     }
 
@@ -278,8 +343,8 @@ final class RemoteScreenView: UIView {
     }
 
     /// Turns accumulated scroll distance (points, natural direction) into
-    /// wheel clicks.
-    private func scroll(by delta: CGPoint) {
+    /// wheel clicks at the pointer.
+    func scroll(by delta: CGPoint) {
         guard !viewOnly else { return }
         scrollRemainder.x += delta.x
         scrollRemainder.y += delta.y
@@ -387,10 +452,7 @@ final class RemoteScreenView: UIView {
         touchpadLast = location
         let speed = hypot(dx, dy)
         let gain = touchpadSpeed * min(1 + speed / 24, 2.5) / scale
-        movePointer(
-            to: CGPoint(
-                x: min(max(pointer.x + dx * gain, 0), fbSize.width - 1),
-                y: min(max(pointer.y + dy * gain, 0), fbSize.height - 1)))
+        movePointer(to: clampToCrop(CGPoint(x: pointer.x + dx * gain, y: pointer.y + dy * gain)))
         followCursor()
     }
 
