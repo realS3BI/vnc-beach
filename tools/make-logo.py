@@ -81,6 +81,19 @@ def icon_svg():
             + icon_body() + '</svg>\n')
 
 
+def macos_icon_svg():
+    """The app icon on Apple's macOS icon grid: the 824 px rounded square sits
+    centred in the 1024 px canvas with a soft shadow. A full-bleed icon shows
+    up a size too large next to the system's icons in the Dock."""
+    scale = 824 / 1024
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs><filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="14"/></filter></defs>
+<rect x="100" y="114" width="824" height="824" rx="180" fill="#000000" opacity="0.28" filter="url(#shadow)"/>
+<g transform="translate(100 100) scale({scale:.4f})">{icon_body()}</g>
+</svg>
+"""
+
+
 def logo_svg():
     # Square canvas with the logo centred: QuickLook only renders square SVGs
     # predictably. `render_png` crops the band back out.
@@ -196,7 +209,11 @@ def main():
         write_ico([p for p in pngs if p[1] in (16, 32, 48)], os.path.join(DOCS, "favicon.ico"))
     resize_png(master, os.path.join(ASSETS, "icon-256.png"), 256)
     resize_png(master, os.path.join(ASSETS, "icon-32.png"), 32)
-    write_icns(master, os.path.join(ASSETS, "icon.icns"))
+    with tempfile.TemporaryDirectory() as tmp:
+        svg = os.path.join(tmp, "icon-macos.svg")
+        open(svg, "w").write(macos_icon_svg())
+        render_png(svg, os.path.join(tmp, "icon-macos.png"), 1024)
+        write_icns(os.path.join(tmp, "icon-macos.png"), os.path.join(ASSETS, "icon.icns"))
     resize_png(master, os.path.join(DOCS, "apple-touch-icon.png"), 180)
     render_png(os.path.join(ASSETS, "logo.svg"), os.path.join(DOCS, "logo.png"), 1700, square=False)
     # Menu bar template image at 2x: 44 px tall so tray-icon shows it at 22 pt

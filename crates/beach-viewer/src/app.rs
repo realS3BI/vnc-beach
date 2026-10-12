@@ -255,7 +255,6 @@ impl App {
                             |ui| {
                                 ui.set_width(width);
                                 ui.add_space(8.0);
-                                self.update_banner(ui, &ctx, width);
                                 connect |= self.form_fields(ui, width);
                                 if let Some(err) = self.error.clone() {
                                     ui.add_space(12.0);
@@ -306,77 +305,69 @@ impl App {
         }
     }
 
-    /// "Version x.y.z" and the manual update check, at the bottom of the
-    /// sidebar.
+    /// Version and update status at the bottom of the sidebar. The button on
+    /// the right is always the next step: check, install, open the download
+    /// page, or try again.
     fn version_row(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let p = Palette::of(ui);
+        let note = match &self.update {
+            Update::Available(r) => Some((format!("VNC Beach {} ist verfügbar.", r.version), p.accent)),
+            Update::Installing(_) => Some(("Update wird geladen und installiert …".to_string(), p.weak)),
+            Update::Current => Some(("VNC Beach ist aktuell.".to_string(), p.weak)),
+            Update::Failed(e) => Some((e.clone(), theme::CORAL)),
+            Update::Checking { manual: true, .. } => Some(("Suche nach Updates …".to_string(), p.weak)),
+            Update::Idle | Update::Checking { manual: false, .. } => None,
+        };
+        if let Some((text, color)) = note {
+            ui.label(RichText::new(text).size(12.0).color(color));
+        }
+        let mut next = None;
         ui.horizontal(|ui| {
             ui.small(RichText::new(format!("Version {}", Version::current())).weak());
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let busy = matches!(self.update, Update::Checking { .. } | Update::Installing(_));
-                let button = theme::Button::new("Nach Updates suchen", Kind::Ghost)
-                    .small()
-                    .enabled(!busy)
-                    .show(ui);
-                if button.clicked() {
-                    self.update = Update::check(ctx, true);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| match &self.update {
+                Update::Idle | Update::Current => {
+                    if theme::Button::new("Nach Updates suchen", Kind::Ghost)
+                        .small()
+                        .show(ui)
+                        .clicked()
+                    {
+                        next = Some(Update::check(ctx, true));
+                    }
                 }
-                if matches!(self.update, Update::Checking { manual: true, .. }) {
-                    ui.spinner();
+                Update::Failed(_) => {
+                    if theme::Button::new("Erneut versuchen", Kind::Ghost)
+                        .small()
+                        .show(ui)
+                        .clicked()
+                    {
+                        next = Some(Update::check(ctx, true));
+                    }
                 }
-            });
-        });
-    }
-
-    /// News about updates above the connect form.
-    fn update_banner(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, width: f32) {
-        let p = Palette::of(ui);
-        let text = match &self.update {
-            Update::Available(r) => format!(
-                "VNC Beach {} ist verfügbar. Installiert ist {}.",
-                r.version,
-                Version::current()
-            ),
-            Update::Installing(_) => "Update wird geladen und installiert …".to_string(),
-            Update::Current => format!("VNC Beach ist aktuell ({}).", Version::current()),
-            Update::Failed(e) => e.clone(),
-            Update::Idle | Update::Checking { .. } => return,
-        };
-        let failed = matches!(self.update, Update::Failed(_));
-        let color = if failed { theme::CORAL } else { p.accent };
-        theme::banner(ui, color).show(ui, |ui| {
-            ui.set_width(width - 28.0);
-            ui.horizontal_wrapped(|ui| {
-                if matches!(self.update, Update::Installing(_)) {
-                    ui.spinner();
-                }
-                ui.label(RichText::new(text).color(p.text));
-            });
-            let mut next = None;
-            ui.horizontal(|ui| match &self.update {
                 Update::Available(release) => {
                     if release.asset.is_some() && update::can_install() {
-                        if theme::button(ui, "Jetzt aktualisieren", Kind::Primary).clicked() {
+                        if theme::Button::new("Jetzt aktualisieren", Kind::Primary)
+                            .small()
+                            .show(ui)
+                            .clicked()
+                        {
                             next = Some(Update::install(ctx, release.clone()));
                         }
-                    } else if theme::button(ui, "Download-Seite öffnen", Kind::Primary).clicked() {
+                    } else if theme::Button::new("Download-Seite öffnen", Kind::Primary)
+                        .small()
+                        .show(ui)
+                        .clicked()
+                    {
                         ctx.open_url(egui::OpenUrl::new_tab(&release.page));
                     }
-                    if theme::button(ui, "Später", Kind::Ghost).clicked() {
-                        next = Some(Update::Idle);
-                    }
                 }
-                Update::Current | Update::Failed(_) => {
-                    if theme::button(ui, "OK", Kind::Secondary).clicked() {
-                        next = Some(Update::Idle);
-                    }
+                Update::Checking { .. } | Update::Installing(_) => {
+                    ui.spinner();
                 }
-                _ => {}
             });
-            if let Some(next) = next {
-                self.update = next;
-            }
         });
-        ui.add_space(16.0);
+        if let Some(next) = next {
+            self.update = next;
+        }
     }
 
     /// The favorites list in the side panel. Returns true if one should be

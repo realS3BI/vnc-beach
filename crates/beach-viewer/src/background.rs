@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use beach_server::{Options, Server};
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-use tray_icon::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
+use tray_icon::{TrayIcon, TrayIconBuilder, TrayIconEvent};
 use winit::application::ApplicationHandler;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 
@@ -234,7 +234,7 @@ impl Tray {
         let builder = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
             .with_tooltip("VNC Beach")
-            .with_menu_on_left_click(false);
+            .with_menu_on_left_click(true);
         // On macOS the icon is a template image: the menu bar tints it for
         // the light, dark and clicked states.
         #[cfg(target_os = "macos")]
@@ -309,20 +309,9 @@ impl Tray {
             }
             self.refresh();
         }
-        while let Ok(event) = TrayIconEvent::receiver().try_recv() {
-            match event {
-                TrayIconEvent::Click {
-                    button: MouseButton::Left,
-                    button_state: MouseButtonState::Up,
-                    ..
-                }
-                | TrayIconEvent::DoubleClick {
-                    button: MouseButton::Left,
-                    ..
-                } => open_viewer(),
-                _ => {}
-            }
-        }
+        // Both mouse buttons open the menu; drain the click events anyway so
+        // the channel doesn't fill up.
+        while TrayIconEvent::receiver().try_recv().is_ok() {}
         if self.quit.load(Ordering::Acquire) {
             if let Some(server) = self.state.lock().unwrap().server.take() {
                 server.stop();
@@ -361,10 +350,47 @@ impl ApplicationHandler for Tray {
     }
 }
 
-/// Starts a viewer window (a separate process).
+/// Shows the viewer window: brings the running one to the front or starts
+/// a new process.
 fn open_viewer() {
-    match std::env::current_exe().map(|exe| std::process::Command::new(exe).spawn()) {
-        Ok(Ok(_)) => {}
-        Ok(Err(e)) | Err(e) => log::warn!("cannot start the viewer: {e}"),
+    let exe = match std::env::current_exe() {
+        Ok(exe) => exe,
+        Err(e) => {
+            log::warn!("cannot start the viewer: {e}");
+            return;
+        }
+    };
+    // `open` on the app bundle brings a running viewer to the front instead
+    // of starting a second one. Without a viewer it would only "activate"
+    // this background process, so that case starts the executable directly.
+    #[cfg(target_os = "macos")]
+    if let Some(bundle) = exe
+        .ancestors()
+        .nth(3)
+        .filter(|p| p.extension().is_some_and(|ext| ext == "app"))
+    {
+        if viewer_running(&exe) {
+            match std::process::Command::new("open").arg(bundle).spawn() {
+                Ok(_) => return,
+                Err(e) => log::warn!("open {}: {e}", bundle.display()),
+            }
+        }
     }
+    if let Err(e) = std::process::Command::new(exe).spawn() {
+        log::warn!("cannot start the viewer: {e}");
+    }
+}
+
+/// Whether a viewer process of this executable (one without `--background`)
+/// is running, according to `ps`.
+#[cfg(target_os = "macos")]
+fn viewer_running(exe: &std::path::Path) -> bool {
+    let Ok(out) = std::process::Command::new("ps").args(["-axo", "args="]).output() else {
+        return false;
+    };
+    let exe = exe.to_string_lossy();
+    String::from_utf8_lossy(&out.stdout).lines().any(|line| {
+        let line = line.trim_end();
+        (line == exe || line.starts_with(&format!("{exe} "))) && !line.contains("--background")
+    })
 }
