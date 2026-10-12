@@ -157,9 +157,29 @@ pub fn clean_up() {
     platform::clean_up();
 }
 
-/// Can this copy replace itself? Not when run from a build directory.
-pub fn can_install() -> bool {
-    platform::target().is_ok()
+/// Can this copy replace itself? Not when run from a build directory or
+/// through App Translocation; the error says why.
+pub fn can_install() -> Result<(), String> {
+    platform::target().map(|_| ())
+}
+
+/// Why a translocated copy can't update itself or register for autostart.
+#[cfg(target_os = "macos")]
+pub const MOVE_TO_APPLICATIONS: &str = "macOS startet VNC Beach aus einer schreibgeschützten Kopie, \
+    weil die App nach dem Download nicht verschoben wurde. Bitte VNC Beach beenden, im Finder in den \
+    Programme-Ordner ziehen und von dort starten.";
+
+/// Whether macOS runs this copy through App Translocation: a quarantined
+/// app started where it was unpacked runs from a read-only mount under
+/// `…/AppTranslocation/<uuid>/` that is gone after a restart.
+#[cfg(target_os = "macos")]
+pub fn translocated() -> bool {
+    std::env::current_exe().is_ok_and(|exe| is_translocated(&exe))
+}
+
+#[cfg(target_os = "macos")]
+fn is_translocated(exe: &Path) -> bool {
+    exe.components().any(|c| c.as_os_str() == "AppTranslocation")
 }
 
 /// Stops a running background process; returns true if there was one.
@@ -231,6 +251,9 @@ mod platform {
     /// The `.app` bundle this binary lives in.
     pub fn target() -> Result<PathBuf, String> {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        if super::is_translocated(&exe) {
+            return Err(super::MOVE_TO_APPLICATIONS.into());
+        }
         let app = exe
             .ancestors()
             .nth(3)
@@ -284,10 +307,13 @@ mod platform {
         Ok(())
     }
 
-    /// Rename, or copy and delete across volumes.
+    /// Rename, or copy and delete across volumes. Other rename errors (read
+    /// only, no permission) return before anything is copied or deleted.
     fn move_dir(from: &Path, to: &Path) -> Result<(), String> {
-        if std::fs::rename(from, to).is_ok() {
-            return Ok(());
+        match std::fs::rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(e) if e.kind() != std::io::ErrorKind::CrossesDevices => return Err(e.to_string()),
+            Err(_) => {}
         }
         run(Command::new("ditto").arg(from).arg(to))?;
         std::fs::remove_dir_all(from).map_err(|e| e.to_string())
@@ -401,6 +427,16 @@ mod tests {
         assert_eq!(Version::parse("1.2.3.4"), None);
         assert!(Version(0, 10, 0) > Version(0, 9, 9));
         assert_eq!(Version(1, 2, 3).to_string(), "1.2.3");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn recognizes_app_translocation() {
+        assert!(is_translocated(Path::new(
+            "/private/var/folders/qr/x/T/AppTranslocation/8B1B/d/VNC Beach.app/Contents/MacOS/vnc-beach"
+        )));
+        assert!(!is_translocated(Path::new("/Applications/VNC Beach.app/Contents/MacOS/vnc-beach")));
+        assert!(!is_translocated(Path::new("/Users/x/AppTranslocation.app/Contents/MacOS/vnc-beach")));
     }
 
     #[test]

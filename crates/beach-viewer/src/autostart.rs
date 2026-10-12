@@ -65,6 +65,11 @@ pub fn set(on: bool) -> io::Result<()> {
             .map(|_| ())
     };
     if on {
+        // A translocated path is gone after a restart; keep whatever
+        // LaunchAgent is there until the app runs from its real place.
+        if crate::update::translocated() {
+            return Err(io::Error::other(crate::update::MOVE_TO_APPLICATIONS));
+        }
         let exe = std::env::current_exe()?;
         let plist = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>

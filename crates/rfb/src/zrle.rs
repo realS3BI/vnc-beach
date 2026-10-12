@@ -55,6 +55,11 @@ impl ZrleEncoder {
         let mut out = vec![0; 4];
         out.reserve(self.raw.len() / 2 + 64);
         let mut input = &self.raw[..];
+        // miniz (flate2's backend) answers a call that finds output still
+        // pending by only draining it, ignoring the flush. So the flush is
+        // complete only after a call that started with nothing pending, i.e.
+        // one that follows a call that didn't fill the buffer.
+        let mut drained = true;
         loop {
             if out.len() == out.capacity() {
                 out.reserve(out.capacity().max(4096));
@@ -64,9 +69,11 @@ impl ZrleEncoder {
                 .compress_vec(input, &mut out, FlushCompress::Sync)
                 .expect("zlib compression cannot fail on valid state");
             input = &input[(self.zlib.total_in() - before) as usize..];
-            if input.is_empty() && out.len() < out.capacity() {
+            let full = out.len() == out.capacity();
+            if input.is_empty() && !full && drained {
                 break;
             }
+            drained = !full;
         }
         let len = (out.len() - 4) as u32;
         out[..4].copy_from_slice(&len.to_be_bytes());
@@ -393,5 +400,32 @@ mod tests {
         roundtrip(&noisy, 130, 66, PixelFormat::BGRX);
         let stripes = image(130, 66, |x, _| [(x / 3) as u8, 0, (x / 3) as u8]);
         roundtrip(&stripes, 130, 66, PixelFormat::BGRX);
+    }
+
+    #[test]
+    fn incompressible_rects_share_the_stream() {
+        // Noise compresses worse than the initial output reservation, so the
+        // output buffer often fills just as the input runs out.
+        let mut seed = 1u32;
+        let mut noise = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            seed as u8
+        };
+        let (w, h) = (300, 200);
+        let img: Vec<u8> = (0..w * h * 4).map(|_| noise()).collect();
+        let pf = PixelFormat::BGRX;
+        let mut enc = ZrleEncoder::new();
+        let mut dec = ZrleDecoder::new();
+        for (rw, rh) in (1..=w).step_by(7).zip((1..=h).step_by(5)) {
+            let payload = enc.encode(&pf, &img, w * 4, rw, rh);
+            let out = dec.decode(&mut &payload[..], &pf, rw, rh).unwrap();
+            for row in 0..rh {
+                for col in 0..rw {
+                    assert_eq!(out[(row * rw + col) * 4..][..3], img[(row * w + col) * 4..][..3]);
+                }
+            }
+        }
     }
 }

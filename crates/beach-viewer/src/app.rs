@@ -321,6 +321,14 @@ impl App {
         if let Some((text, color)) = note {
             ui.label(RichText::new(text).size(12.0).color(color));
         }
+        // Why "Jetzt aktualisieren" isn't offered, e.g. a translocated app.
+        let blocked = match &self.update {
+            Update::Available(r) if r.asset.is_some() => update::can_install().err(),
+            _ => None,
+        };
+        if let Some(why) = &blocked {
+            ui.label(RichText::new(why).size(12.0).color(p.weak));
+        }
         let mut next = None;
         ui.horizontal(|ui| {
             ui.small(RichText::new(format!("Version {}", Version::current())).weak());
@@ -344,7 +352,7 @@ impl App {
                     }
                 }
                 Update::Available(release) => {
-                    if release.asset.is_some() && update::can_install() {
+                    if release.asset.is_some() && blocked.is_none() {
                         if theme::Button::new("Jetzt aktualisieren", Kind::Primary)
                             .small()
                             .show(ui)

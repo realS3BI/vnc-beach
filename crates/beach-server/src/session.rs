@@ -63,7 +63,8 @@ pub fn run(stream: TcpStream, ctx: &Context) -> anyhow::Result<()> {
     let mut session = Session {
         out: BufWriter::with_capacity(1 << 20, stream),
         pf: PixelFormat::BGRX,
-        zrle: None,
+        zrle: ZrleEncoder::new(),
+        use_zrle: false,
         desktop_size: false,
         extended_desktop_size: false,
         layout_announced: false,
@@ -84,7 +85,10 @@ pub fn run(stream: TcpStream, ctx: &Context) -> anyhow::Result<()> {
 struct Session {
     out: BufWriter<TcpStream>,
     pf: PixelFormat,
-    zrle: Option<ZrleEncoder>,
+    /// One zlib stream for the whole connection (RFC 6143 §7.7.6), kept
+    /// when the client sends SetEncodings again.
+    zrle: ZrleEncoder,
+    use_zrle: bool,
     /// The client understands DesktopSize / ExtendedDesktopSize rectangles.
     desktop_size: bool,
     extended_desktop_size: bool,
@@ -192,7 +196,7 @@ impl Session {
             }
             ClientMessage::SetEncodings(encs) => {
                 log::debug!("client encodings: {encs:?}");
-                self.zrle = encs.contains(&encoding::ZRLE).then(ZrleEncoder::new);
+                self.use_zrle = encs.contains(&encoding::ZRLE);
                 self.desktop_size = encs.contains(&encoding::DESKTOP_SIZE);
                 self.extended_desktop_size = encs.contains(&encoding::EXTENDED_DESKTOP_SIZE);
                 self.layout_announced = false;
@@ -333,7 +337,7 @@ impl Session {
         let mut buf = Vec::new();
         for (x, y, w, h) in rects {
             let region = &frame.rgba[y * stride + x * 4..];
-            let encoding = if self.zrle.is_some() {
+            let encoding = if self.use_zrle {
                 encoding::ZRLE
             } else {
                 encoding::RAW
@@ -346,13 +350,12 @@ impl Session {
                 encoding,
             }
             .write(&mut self.out)?;
-            match &mut self.zrle {
-                Some(zrle) => self.out.write_all(&zrle.encode(&self.pf, region, stride, w, h))?,
-                None => {
-                    buf.clear();
-                    self.pf.encode_rgba(region, stride, w, h, &mut buf);
-                    self.out.write_all(&buf)?;
-                }
+            if self.use_zrle {
+                self.out.write_all(&self.zrle.encode(&self.pf, region, stride, w, h))?;
+            } else {
+                buf.clear();
+                self.pf.encode_rgba(region, stride, w, h, &mut buf);
+                self.out.write_all(&buf)?;
             }
         }
         self.out.flush()?;
