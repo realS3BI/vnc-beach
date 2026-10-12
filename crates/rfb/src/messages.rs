@@ -29,6 +29,7 @@ pub enum ClientMessage {
         y: u16,
     },
     ClientCutText(String),
+    FileTransfer(crate::files::Request),
     /// Request for a new framebuffer size and layout (sent by viewers that
     /// saw an [`EXTENDED_DESKTOP_SIZE`](crate::encoding::EXTENDED_DESKTOP_SIZE)
     /// rectangle). Servers that can't resize answer with status
@@ -74,6 +75,7 @@ impl ClientMessage {
                 r.skip(3)?;
                 ClientMessage::ClientCutText(read_cut_text(r)?)
             }
+            crate::files::MESSAGE_TYPE => ClientMessage::FileTransfer(crate::files::Request::read(r)?),
             251 => {
                 r.skip(1)?;
                 let width = r.u16()?;
@@ -126,6 +128,7 @@ impl ClientMessage {
                 b.put_u16(x)?;
                 b.put_u16(y)?;
             }
+            ClientMessage::FileTransfer(request) => return request.write(w),
             ClientMessage::ClientCutText(text) => {
                 b.extend_from_slice(&[6, 0, 0, 0]);
                 write_cut_text(&mut b, text)?;
@@ -280,6 +283,7 @@ pub enum ServerMessage {
     SetColourMapEntries,
     Bell,
     ServerCutText(String),
+    FileTransfer(crate::files::Response),
 }
 
 impl ServerMessage {
@@ -301,6 +305,7 @@ impl ServerMessage {
                 r.skip(3)?;
                 ServerMessage::ServerCutText(read_cut_text(r)?)
             }
+            crate::files::MESSAGE_TYPE => ServerMessage::FileTransfer(crate::files::Response::read(r)?),
             t => return proto(format!("unknown server message type {t}")),
         })
     }
@@ -423,7 +428,10 @@ mod tests {
         )
         .unwrap();
         let mut r = &buf[..];
-        assert_eq!(ServerMessage::read(&mut r).unwrap(), ServerMessage::FramebufferUpdate { rects: 1 });
+        assert_eq!(
+            ServerMessage::read(&mut r).unwrap(),
+            ServerMessage::FramebufferUpdate { rects: 1 }
+        );
         let rect = Rect::read(&mut r).unwrap();
         assert_eq!(
             rect,

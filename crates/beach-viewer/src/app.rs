@@ -1067,6 +1067,7 @@ const POINTS_PER_NOTCH: f32 = 40.0;
 
 struct Remote {
     conn: Connection,
+    files: crate::files::Panel,
     /// Shown in the toolbar.
     label: String,
     settings: Settings,
@@ -1092,7 +1093,7 @@ struct Remote {
 }
 
 impl Remote {
-    fn new(conn: Connection, label: String, settings: Settings, ctx: &egui::Context) -> Self {
+    fn new(mut conn: Connection, label: String, settings: Settings, ctx: &egui::Context) -> Self {
         let swap_cmd_ctrl = match settings.shortcuts {
             Shortcuts::Auto => cfg!(target_os = "macos") != conn.remote.is_mac(),
             Shortcuts::Swap => true,
@@ -1100,8 +1101,13 @@ impl Remote {
         };
         let keys = KeyMap::for_remote(conn.remote);
         let clipboard = settings.clipboard.then(|| Clipboard::start(ctx.clone()));
+        let files = crate::files::Panel::new(
+            conn.files.take().expect("one file worker per connection"),
+            ctx.clone(),
+        );
         Remote {
             conn,
+            files,
             label,
             settings,
             clipboard,
@@ -1178,6 +1184,8 @@ impl Remote {
                 Err(TryRecvError::Disconnected) => return Err("Verbindung verloren".into()),
             }
         }
+        let files_were_open = self.files.open;
+        self.files.tick(ctx, self.settings.view_only);
         self.upload(ctx);
         if let Some(clipboard) = &self.clipboard {
             let changes: Vec<_> = clipboard
@@ -1199,6 +1207,9 @@ impl Remote {
                 ui.horizontal_centered(|ui| {
                     ui.label(&self.label);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(self.files.button_label()).clicked() {
+                            self.files.open = !self.files.open;
+                        }
                         if ui.button("Trennen").clicked() {
                             disconnect = true;
                         }
@@ -1253,6 +1264,10 @@ impl Remote {
         if disconnect {
             return Err("vom Benutzer".into());
         }
+        if self.files.open && !files_were_open {
+            let out = self.release_all();
+            self.conn.send(&out);
+        }
 
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(Color32::BLACK))
@@ -1278,6 +1293,7 @@ impl Remote {
                     });
                 }
             });
+        self.files.show(ctx, self.settings.view_only);
         Ok(())
     }
 
@@ -1286,7 +1302,9 @@ impl Remote {
         let response = ui.interact(area, ui.id().with("remote"), egui::Sense::click_and_drag());
         // Keep keyboard focus on the remote screen and stop egui from using
         // Tab/arrows/Esc for its own focus navigation.
-        response.request_focus();
+        if !self.files.open {
+            response.request_focus();
+        }
         ui.memory_mut(|m| {
             m.set_focus_lock_filter(
                 response.id,
@@ -1307,7 +1325,10 @@ impl Remote {
             );
             ui.painter().image(tex.id(), image_rect, uv, Color32::WHITE);
         }
-        if !self.settings.view_only {
+        if !self.settings.view_only
+            && !self.files.open
+            && ctx.input(|i| i.raw.hovered_files.is_empty() && i.raw.dropped_files.is_empty())
+        {
             self.handle_input(ctx, image_rect);
         }
     }

@@ -1,9 +1,9 @@
 //! One connected viewer.
 
 use std::io::{BufReader, BufWriter, Write};
-use std::net::TcpStream;
+use std::net::{Shutdown, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, RecvTimeoutError};
+use std::sync::mpsc::{sync_channel, RecvTimeoutError};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,6 +23,7 @@ pub struct Context {
     pub clipboard: Arc<Clipboard>,
     pub input: Option<Input>,
     pub password: Option<String>,
+    pub file_transfer: bool,
     pub fps: u32,
     pub name: String,
     /// Set when the server shuts down; sessions end at their next tick.
@@ -33,6 +34,7 @@ const TILE: usize = 64;
 
 pub fn run(stream: TcpStream, ctx: &Context) -> anyhow::Result<()> {
     stream.set_nodelay(true)?;
+    stream.set_write_timeout(Some(Duration::from_secs(15)))?;
     let _watch = ctx.screen.watch();
     let frame = ctx.screen.latest();
     let init = ServerInit {
@@ -44,7 +46,8 @@ pub fn run(stream: TcpStream, ctx: &Context) -> anyhow::Result<()> {
     let mut handshake_stream = stream.try_clone()?;
     server_handshake(&mut handshake_stream, ctx.password.as_deref(), &init).context("handshake")?;
 
-    let (tx, rx) = channel();
+    let (tx, rx) = sync_channel(8);
+    let shutdown = stream.try_clone()?;
     let reader = BufReader::new(stream.try_clone()?);
     std::thread::spawn(move || {
         let mut reader = reader;
@@ -68,8 +71,10 @@ pub fn run(stream: TcpStream, ctx: &Context) -> anyhow::Result<()> {
         sent: None,
         layout: frame.layout.clone(),
         clipboard_seq: ctx.clipboard.seq(),
+        files: None,
     };
     let result = session.serve(ctx, rx);
+    let _ = shutdown.shutdown(Shutdown::Both);
     if let Some(input) = &ctx.input {
         input.send(Event::ReleaseAll);
     }
@@ -92,6 +97,7 @@ struct Session {
     /// Framebuffer size and display arrangement the client knows about.
     layout: Arc<Layout>,
     clipboard_seq: u64,
+    files: Option<crate::files::Session>,
 }
 
 /// Outstanding update requests, merged: a full request always wins over an
@@ -190,6 +196,20 @@ impl Session {
                 self.desktop_size = encs.contains(&encoding::DESKTOP_SIZE);
                 self.extended_desktop_size = encs.contains(&encoding::EXTENDED_DESKTOP_SIZE);
                 self.layout_announced = false;
+                if ctx.file_transfer && encs.contains(&encoding::BEACH_FILE_TRANSFER) {
+                    if self.files.is_none() {
+                        match crate::files::Session::home() {
+                            Ok(files) => {
+                                files.hello().write(&mut self.out)?;
+                                self.out.flush()?;
+                                self.files = Some(files);
+                            }
+                            Err(e) => log::warn!("file transfer unavailable: {e}"),
+                        }
+                    }
+                } else {
+                    self.files = None;
+                }
             }
             ClientMessage::FramebufferUpdateRequest {
                 incremental,
@@ -235,6 +255,14 @@ impl Session {
                         layout: self.layout.clone(),
                     });
                 }
+            }
+            ClientMessage::FileTransfer(request) => {
+                // Receiving an extension request without negotiation is a protocol error.
+                let Some(files) = &mut self.files else {
+                    anyhow::bail!("file transfer was not negotiated");
+                };
+                files.handle(request).write(&mut self.out)?;
+                self.out.flush()?;
             }
             ClientMessage::ClientCutText(text) => {
                 log::debug!("viewer clipboard: {} chars", text.chars().count());
@@ -405,10 +433,16 @@ mod tests {
         // Pixel (70, 10) is in tile column 1, row 0; (199, 129) in the last tile.
         cur.rgba[(10 * 200 + 70) * 4] = 1;
         cur.rgba[(129 * 200 + 199) * 4] = 1;
-        assert_eq!(dirty_rects(&prev, &cur, all), vec![(64, 0, 64, 64), (192, 128, 8, 2)]);
+        assert_eq!(
+            dirty_rects(&prev, &cur, all),
+            vec![(64, 0, 64, 64), (192, 128, 8, 2)]
+        );
         // Only the part inside the requested region is reported, clipped to it.
         assert_eq!(dirty_rects(&prev, &cur, (0, 0, 100, 130)), vec![(64, 0, 36, 64)]);
-        assert_eq!(dirty_rects(&prev, &cur, (100, 100, 100, 30)), vec![(192, 128, 8, 2)]);
+        assert_eq!(
+            dirty_rects(&prev, &cur, (100, 100, 100, 30)),
+            vec![(192, 128, 8, 2)]
+        );
         assert!(dirty_rects(&prev, &cur, (0, 64, 64, 64)).is_empty());
     }
 

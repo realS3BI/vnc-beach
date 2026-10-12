@@ -8,6 +8,7 @@ mod client;
 mod clipboard;
 mod config;
 mod control;
+mod files;
 mod icon;
 mod keys;
 mod server_panel;
@@ -42,6 +43,7 @@ fn main() {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("VNC Beach")
+            .with_drag_and_drop(true)
             .with_icon(std::sync::Arc::new(icon::window()))
             .with_inner_size([1100.0, 700.0])
             .with_min_inner_size([480.0, 320.0]),

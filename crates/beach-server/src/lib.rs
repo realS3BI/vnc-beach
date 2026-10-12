@@ -3,6 +3,7 @@
 
 pub mod capture;
 pub mod clipboard;
+pub mod files;
 pub mod input;
 #[cfg(target_os = "macos")]
 pub mod keymap;
@@ -91,6 +92,7 @@ impl Server {
             screen,
             clipboard,
             input,
+            file_transfer: !opts.view_only,
             password: opts.password,
             fps: opts.fps,
             name: opts.name.unwrap_or_else(|| {

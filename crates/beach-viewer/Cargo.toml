@@ -9,11 +9,13 @@ anyhow = "1.0.104"
 arboard = "3.6.1"
 beach-server = { version = "0.2.1", path = "../beach-server" }
 clap = { version = "4.6.7", features = ["derive", "env"] }
+dirs = "6"
 eframe = "0.36.2"
 egui = "0.36"
 env_logger = "0.11.11"
 log = "0.4.34"
 rfb = { version = "0.2.1", path = "../rfb" }
+rfd = "0.17"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
 toml = "1.1"
@@ -28,3 +30,6 @@ winreg = "0.56"
 
 [build-dependencies]
 embed-resource = "3"
+
+[dev-dependencies]
+tempfile = "3.27"

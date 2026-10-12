@@ -15,6 +15,7 @@ Erste lauffähige Version (0.1). Umgesetzt:
 - Maus mit drei Tasten und Scrollrad; Retina/HiDPI wird umgerechnet
 - Tastatur: Zeichen werden als Text eingefügt und kommen dadurch unabhängig vom Tastaturlayout an (`@`, `€`, Umlaute). Shortcuts mit Strg/Cmd lösen echte Tasten aus.
 - Zwischenablage für Text in beide Richtungen (Latin-1, wie im Standard)
+- Dateiübertragung zwischen Desktop-Viewer und VNC-Beach-Server: lokale Dateien ins VNC-Fenster ziehen, Serverdateien über „Dateien“ herunterladen
 - Auflösungswechsel während der Sitzung (DesktopSize)
 - Mehrere Bildschirme: Der Server teilt standardmäßig alle Bildschirme als einen virtuellen Schreibtisch (auch für fremde Viewer) und meldet die Anordnung per ExtendedDesktopSize; VNC-Beach-Viewer und iPad-App schalten in der Sitzung auf einen einzelnen Bildschirm um und fordern dann nur noch diesen Ausschnitt an
 - Viewer mit Verbindungsdialog; das Fenster passt sich an den entfernten Bildschirm an
@@ -89,6 +90,14 @@ Die Standardwerte stehen in `config.toml` neben `servers.toml` unter `[viewer]`,
 **Mehrere Bildschirme:** Teilt der Server alle Bildschirme (Standard des VNC-Beach-Servers), zeigt der Viewer sie zunächst nebeneinander. Meldet der Server die Anordnung (ExtendedDesktopSize, wie TigerVNC), erscheint in der Leiste „Alle Bildschirme“ mit einem Eintrag je Bildschirm; die Auswahl zeigt nur noch diesen, passt das Fenster an und fordert vom Server nur noch diesen Ausschnitt an (`FramebufferUpdateRequest` mit Rechteck, Standard-RFB).
 
 **Zwischenablage:** Der Viewer beobachtet die lokale Zwischenablage und schickt jede Änderung an den Server, auch schon beim Verbinden. Was auf der Gegenseite kopiert wird, landet lokal. Ein Rechtsklick → Einfügen auf der Gegenseite funktioniert damit ohne Strg+V im Viewer. Ausnahme ist die Bildschirmfreigabe von macOS: Apples Server ignoriert die Zwischenablage-Nachrichten fremder Viewer in beide Richtungen (gemessen mit `cargo run -p rfb --example probe`). Dort fügt Strg+V bzw. Cmd+V den lokalen Text per Tastatur ein; Rechtsklick → Einfügen und die Richtung Mac → Viewer gehen nur mit dem VNC-Beach-Server auf dem Mac.
+
+**Dateien übertragen:** Verbinde dich mit einem aktuellen VNC-Beach-Server und öffne in der Sitzungsleiste **Dateien**. Der angezeigte Serverordner ist das Ziel für Dateien, die du vom lokalen Finder oder Explorer ins VNC-Fenster ziehst. Anfangs ist das der Download-Ordner des Serverbenutzers, sofern er innerhalb seines Benutzerordners liegt, sonst der Benutzerordner selbst. Öffne einen Unterordner oder gib seinen relativen Pfad ein, um das Ziel zu ändern. Der Ordner unter dem Mauszeiger im entfernten Desktop ist dabei nicht das Übertragungsziel.
+
+Zum Übertragen in die Gegenrichtung klicke neben einer Serverdatei auf **Herunterladen**. Unter **Lokal speichern** wählst du den lokalen Zielordner. Alternativ zum Ziehen kannst du lokale Dateien mit **Dateien auswählen …** hochladen. Mehrere Dateien werden nacheinander übertragen. Ganze Ordner müssen vorher als ZIP-Datei gepackt werden.
+
+Übertragungen kopieren die Dateien; die Originale bleiben erhalten. Vorhandene Zieldateien werden nicht überschrieben. Fortschritt und **Abbrechen** erscheinen im Dateibereich. Bei Abbruch oder Verbindungsverlust wird die unvollständige Datei entfernt; bereits vollständig kopierte Dateien bleiben erhalten. Übertragbar sind reguläre Dateien mit plattformübergreifend gültigen Namen innerhalb des Benutzerordners auf dem Server. Bei **Nur ansehen** ist die Dateiübertragung deaktiviert.
+
+Die Dateiübertragung verwendet eine ausgehandelte VNC-Beach-Erweiterung. Andere VNC-Server, darunter die eingebaute macOS-Bildschirmfreigabe, bieten diese Funktion nicht an. Die normale Bildschirmverbindung bleibt kompatibel. Die iOS-App bietet derzeit keine Dateiübertragung.
 
 **Tastenkürzel:** Bei „Automatisch" erkennt der Viewer einen Mac als Gegenstelle (Bildschirmfreigabe meldet sich als RFB 3.889, der VNC-Beach-Server nennt sein System im Namen) und schickt von Windows aus Strg als Cmd: Strg+C wird Cmd+C. Umgekehrt wird Cmd vom Mac auf einem Windows-Rechner zu Strg. Zwischen zwei gleichen Systemen bleibt alles wie gedrückt. Die Bildschirmfreigabe von macOS liest Tasten anders als alle anderen Server (Alt_L ist dort Cmd, Meta_L ist Option); der Viewer schickt deshalb je nach Gegenstelle andere Keysyms, damit Alt immer Option und Strg bzw. Cmd immer Cmd ergibt.
 

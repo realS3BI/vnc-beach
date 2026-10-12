@@ -5,6 +5,7 @@
 
 pub mod auth;
 pub mod encoding;
+pub mod files;
 pub mod handshake;
 pub mod io;
 pub mod keysym;

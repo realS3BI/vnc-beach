@@ -2,7 +2,7 @@
 
 use std::io::{BufReader, BufWriter, Write};
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -73,6 +73,7 @@ pub struct Connection {
     region: Arc<Mutex<Option<Region>>>,
     writer: Arc<Mutex<BufWriter<TcpStream>>>,
     stream: TcpStream,
+    pub files: Option<FileChannel>,
 }
 
 impl Connection {
@@ -85,6 +86,7 @@ impl Connection {
     ) -> rfb::Result<Connection> {
         let mut stream = connect(addr)?;
         stream.set_nodelay(true)?;
+        stream.set_write_timeout(Some(Duration::from_secs(15)))?;
         stream.set_read_timeout(Some(Duration::from_secs(15)))?;
         let (init, banner) = client_handshake_with_banner(&mut stream, password)?;
         let remote = detect(&banner, &init.name);
@@ -101,6 +103,7 @@ impl Connection {
             encoding::RAW,
             encoding::EXTENDED_DESKTOP_SIZE,
             encoding::DESKTOP_SIZE,
+            encoding::BEACH_FILE_TRANSFER,
         ])
         .write(&mut writer)?;
         request((0, 0, w, h), false).write(&mut writer)?;
@@ -109,6 +112,7 @@ impl Connection {
         let writer = Arc::new(Mutex::new(writer));
         let region = Arc::new(Mutex::new(None));
         let (tx, notices) = channel();
+        let (file_tx, replies) = sync_channel(1);
         let reader = Reader {
             input: BufReader::with_capacity(1 << 20, stream.try_clone()?),
             output: writer.clone(),
@@ -117,6 +121,7 @@ impl Connection {
             pf,
             zrle: ZrleDecoder::new(),
             notices: tx,
+            files: file_tx,
             repaint: Box::new(repaint),
         };
         std::thread::Builder::new()
@@ -129,8 +134,12 @@ impl Connection {
             fb,
             notices,
             region,
-            writer,
+            writer: writer.clone(),
             stream,
+            files: Some(FileChannel {
+                writer: writer.clone(),
+                replies,
+            }),
         })
     }
 
@@ -245,6 +254,7 @@ struct Reader {
     pf: PixelFormat,
     zrle: ZrleDecoder,
     notices: Sender<Notice>,
+    files: SyncSender<rfb::files::Response>,
     repaint: Box<dyn Fn() + Send>,
 }
 
@@ -281,6 +291,13 @@ impl Reader {
                 ServerMessage::ServerCutText(text) => {
                     let _ = self.notices.send(Notice::Clipboard(text));
                     (self.repaint)();
+                }
+                ServerMessage::FileTransfer(response) => {
+                    // There is one outstanding file request. A peer that floods
+                    // unsolicited replies must not block framebuffer decoding.
+                    if let Err(std::sync::mpsc::TrySendError::Full(_)) = self.files.try_send(response) {
+                        return Err(Error::Protocol("unsolicited file transfer response".into()));
+                    }
                 }
                 ServerMessage::Bell | ServerMessage::SetColourMapEntries => {}
             }
@@ -358,6 +375,32 @@ fn blit(fb: &mut Framebuffer, x: usize, y: usize, w: usize, rgba: &[u8]) {
     let stride = fb.width * 4;
     for (row, src) in rgba.chunks_exact(w * 4).enumerate() {
         fb.rgba[(y + row) * stride + x * 4..][..w * 4].copy_from_slice(src);
+    }
+}
+
+/// Owned by one file worker; no file I/O or response waits run on the UI thread.
+pub struct FileChannel {
+    writer: Arc<Mutex<BufWriter<TcpStream>>>,
+    replies: Receiver<rfb::files::Response>,
+}
+
+impl FileChannel {
+    pub fn hello(&self) -> Result<rfb::files::Response, std::sync::mpsc::RecvTimeoutError> {
+        self.replies.recv_timeout(Duration::from_secs(8))
+    }
+
+    pub fn cancel_pending(&self) {
+        let _ = send(
+            &self.writer,
+            &[ClientMessage::FileTransfer(rfb::files::Request::Cancel)],
+        );
+    }
+
+    pub fn request(&self, request: rfb::files::Request) -> rfb::Result<rfb::files::Response> {
+        send(&self.writer, &[ClientMessage::FileTransfer(request)])?;
+        self.replies
+            .recv_timeout(Duration::from_secs(30))
+            .map_err(|e| Error::Protocol(format!("file transfer response missing: {e}")))
     }
 }
 

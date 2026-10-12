@@ -30,7 +30,7 @@ struct Args {
     /// Maximum frames per second sent to viewers.
     #[arg(long, default_value_t = 60)]
     fps: u32,
-    /// Ignore keyboard and mouse input from viewers.
+    /// Ignore keyboard and mouse input and disable file transfers.
     #[arg(long)]
     view_only: bool,
 }

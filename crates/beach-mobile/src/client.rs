@@ -315,6 +315,9 @@ impl Reader {
                     send(&self.output, &[request(region, true)])?;
                 }
                 ServerMessage::ServerCutText(text) => (self.on_event)(Event::Clipboard(text)),
+                ServerMessage::FileTransfer(_) => {
+                    return Err(Error::Protocol("file transfer was not negotiated".into()));
+                }
                 ServerMessage::Bell | ServerMessage::SetColourMapEntries => {}
             }
         }
