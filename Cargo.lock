@@ -494,14 +494,14 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "beach-mobile"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "rfb",
 ]
 
 [[package]]
 name = "beach-server"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "arboard",
@@ -519,7 +519,7 @@ dependencies = [
 
 [[package]]
 name = "beach-viewer"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3546,7 +3546,7 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "rfb"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "des",
  "flate2",
