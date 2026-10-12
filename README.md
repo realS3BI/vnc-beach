@@ -123,7 +123,7 @@ Heruntergeladen wird mit dem `curl` des Systems (macOS, Windows 10 ab 1803). Sol
 ./release.sh 0.2.0 --skip-windows --skip-ios
 ```
 
-Das Skript zeigt die aktuelle Version aus `Cargo.toml` an. Ohne Versionsargument fragt es nach der gewünschten Release-Version. Das gilt auch für `./release.sh --dry-run`.
+Das Skript zeigt die aktuelle Version aus `Cargo.toml` an und prüft die Voraussetzungen für den Release. Ohne Versionsargument fragt es danach nach der gewünschten Release-Version. Das gilt auch für `./release.sh --dry-run`.
 
 Das Skript setzt die Version in `Cargo.toml` und `apps/ios/Config/Base.xcconfig`, testet, baut die Mac-App hier (`tools/build-macos-app.sh`, universell für Apple Silicon und Intel) und die Windows-Exe auf dem PC (`tools/build-windows.sh` über SSH), committet „Release vX.Y.Z“, taggt und pusht. Danach legt es mit `gh` das GitHub-Release mit `VNC-Beach-macOS.zip` und `VNC-Beach-Windows.exe` an, zu finden unter [github.com/realS3BI/vnc-beach/releases](https://github.com/realS3BI/vnc-beach/releases). Zum Schluss baut `tools/release-ios.sh` die iOS-App und lädt sie zu TestFlight hoch. Dafür braucht es einen App-Store-Connect-API-Schlüssel, beschrieben in `~/.config/vnc-beach/appstoreconnect.env` (außerhalb des Repositorys, Format im Kopf des Skripts). Es bricht ab, wenn `main` nicht sauber ist, hinter `origin` liegt, der Tag schon existiert oder der PC nicht erreichbar ist.
 

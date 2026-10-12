@@ -48,6 +48,21 @@ CURRENT=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Carg
 [ -n "$CURRENT" ] || die "no version in [workspace.package] of Cargo.toml"
 print "Current VNC Beach version: $CURRENT"
 
+if [ $DRY = 0 ]; then
+  [ "$(git branch --show-current)" = main ] || die "releases are made from main"
+  [ -z "$(git status --porcelain)" ] || die "the working tree is not clean; commit or stash first"
+  git fetch --quiet origin
+  git merge-base --is-ancestor origin/main HEAD || die "main is behind origin/main; pull first"
+  gh auth status >/dev/null 2>&1 || die "gh is not logged in (gh auth login)"
+fi
+if [ $SKIP_IOS = 0 ] && [ $DRY = 0 ] && [ ! -f "$HOME/.config/vnc-beach/appstoreconnect.env" ]; then
+  die "no App Store Connect key (~/.config/vnc-beach/appstoreconnect.env); set it up or use --skip-ios"
+fi
+if [ $SKIP_WIN = 0 ]; then
+  ssh -o ConnectTimeout=8 -o BatchMode=yes sebastian-pc 'exit' 2>/dev/null \
+    || die "the PC (sebastian-pc) is not reachable; start it or use --skip-windows"
+fi
+
 if [ -z "$VERSION" ]; then
   print -n "Version to release (X.Y.Z): "
   read -r VERSION || die "no version entered"
@@ -63,24 +78,12 @@ if [ "$newer" = "0 0" ]; then
   die "$VERSION is lower than the current version $CURRENT"
 fi
 
-step "VNC Beach $CURRENT -> $VERSION$([ $DRY = 1 ] && print ' (dry run)')"
-
 if [ $DRY = 0 ]; then
-  [ "$(git branch --show-current)" = main ] || die "releases are made from main"
-  [ -z "$(git status --porcelain)" ] || die "the working tree is not clean; commit or stash first"
-  git fetch --quiet origin
-  git merge-base --is-ancestor origin/main HEAD || die "main is behind origin/main; pull first"
   git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && die "tag $TAG exists already"
   git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1 && die "tag $TAG exists on GitHub already"
-  gh auth status >/dev/null 2>&1 || die "gh is not logged in (gh auth login)"
 fi
-if [ $SKIP_IOS = 0 ] && [ $DRY = 0 ] && [ ! -f "$HOME/.config/vnc-beach/appstoreconnect.env" ]; then
-  die "no App Store Connect key (~/.config/vnc-beach/appstoreconnect.env); set it up or use --skip-ios"
-fi
-if [ $SKIP_WIN = 0 ]; then
-  ssh -o ConnectTimeout=8 -o BatchMode=yes sebastian-pc 'exit' 2>/dev/null \
-    || die "the PC (sebastian-pc) is not reachable; start it or use --skip-windows"
-fi
+
+step "VNC Beach $CURRENT -> $VERSION$([ $DRY = 1 ] && print ' (dry run)')"
 
 VERSION_FILES=(Cargo.toml Cargo.lock crates/*/Cargo.toml apps/ios/Config/Base.xcconfig)
 if [ $DRY = 1 ]; then
