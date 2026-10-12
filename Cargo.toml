@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/rfb", "crates/beach-server", "crates/beach-viewer", "crates/beach-mobile"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/realS3BI/vnc-beach"
