@@ -3,7 +3,8 @@
 //!     cargo run -p rfb --example probe -- HOST:PORT PASSWORD CMD...
 //!
 //! Commands: `cut:TEXT` sends ClientCutText; `key:HEX:MS` presses keysym HEX
-//! for MS milliseconds; `listen:SECS` prints ServerCutText for a while.
+//! for MS milliseconds; `move:X:Y` moves the pointer; `click:X:Y` clicks the
+//! left button there; `listen:SECS` prints ServerCutText for a while.
 
 use std::io::BufReader;
 use std::net::TcpStream;
@@ -36,6 +37,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::thread::sleep(Duration::from_millis(ms.parse()?));
                 ClientMessage::KeyEvent { down: false, key }.write(&mut writer)?;
                 println!("key {hex} up");
+            }
+            ["move", x, y] => {
+                let (x, y) = (x.parse()?, y.parse()?);
+                ClientMessage::PointerEvent { buttons: 0, x, y }.write(&mut writer)?;
+                println!("pointer at {x},{y}");
+            }
+            ["click", x, y] => {
+                let (x, y) = (x.parse()?, y.parse()?);
+                for buttons in [1, 0] {
+                    ClientMessage::PointerEvent { buttons, x, y }.write(&mut writer)?;
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                println!("clicked at {x},{y}");
             }
             ["listen", secs] => {
                 let until = Instant::now() + Duration::from_secs(secs.parse()?);
