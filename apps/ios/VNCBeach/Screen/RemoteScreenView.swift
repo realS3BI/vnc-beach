@@ -31,6 +31,8 @@ final class RemoteScreenView: UIView {
     var remote = RemoteKind.other
     var touchpadSpeed: CGFloat = 1
     var onViewportChange: ((CGFloat) -> Void)?
+    /// The software keyboard was shown or hidden, also by the system.
+    var onKeyboardVisibleChange: ((Bool) -> Void)?
     /// Keep the image above the software keyboard instead of under it.
     var shrinkForKeyboard = false {
         didSet { if oldValue != shrinkForKeyboard { setNeedsLayout() } }
@@ -598,6 +600,22 @@ final class RemoteScreenView: UIView {
             becomeFirstResponder()
         }
         reloadInputViews()
+        onKeyboardVisibleChange?(visible)
+    }
+
+    /// The iPad keyboard's hide key resigns the first responder: record the
+    /// keyboard as hidden and take the responder back for hardware keys.
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned, keyboardVisible {
+            keyboardVisible = false
+            onKeyboardVisibleChange?(false)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.window != nil, !self.isFirstResponder else { return }
+                self.becomeFirstResponder()
+            }
+        }
+        return resigned
     }
 
     private var commandHeld: Bool {

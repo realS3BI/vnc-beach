@@ -10,7 +10,9 @@ struct SessionScreen: View {
     @State private var session = RemoteSession()
     @State private var controller = ScreenController()
     @State private var toolbarExpanded = true
-    @State private var pasteboardChangeCount = UIPasteboard.general.changeCount
+    /// The pasteboard state last sent or received; nil until the first
+    /// connect, so text copied before connecting goes over too.
+    @State private var pasteboardChangeCount: Int?
     @State private var wasConnected = false
 
     private var swapCommandControl: Bool {
@@ -64,6 +66,17 @@ struct SessionScreen: View {
                 resumed()
             default:
                 break
+            }
+        }
+        .task(id: session.state == .connected) {
+            // Copying in another app doesn't always change the scene phase
+            // (Split View, Stage Manager, Slide Over), so watch the change
+            // count; reading it doesn't trigger the paste prompt.
+            while session.state == .connected, !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                if controller.view?.window?.isKeyWindow == true {
+                    sendPasteboard(force: false)
+                }
             }
         }
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
@@ -152,14 +165,20 @@ struct SessionScreen: View {
             } label: {
                 Image(systemName: toolbarExpanded ? "chevron.up" : "chevron.down")
                     .font(.caption.weight(.bold))
-                    .frame(width: 36, height: 30)
+                    .frame(width: 44, height: 34)
+                    .contentShape(Rectangle())
             }
             .accessibilityLabel(toolbarExpanded ? "Leiste einklappen" : "Leiste ausklappen")
         }
         .buttonStyle(.plain)
         .tint(.primary)
         .background(.regularMaterial, in: Capsule())
+        .contentShape(Capsule())
         .padding(.top, 6)
+        // Collapsed, the handle would sit under the iPad's multitasking
+        // control at the top centre, which swallows the tap.
+        .padding(.trailing, toolbarExpanded ? 0 : 16)
+        .frame(maxWidth: .infinity, alignment: toolbarExpanded ? .center : .trailing)
     }
 
     /// -1 stands for "all displays"; the picker can't hold an optional.

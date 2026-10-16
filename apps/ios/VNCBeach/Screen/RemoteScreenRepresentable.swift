@@ -57,6 +57,11 @@ struct RemoteScreenRepresentable: UIViewRepresentable {
                 controller?.zoom = zoom
             }
         }
+        view.onKeyboardVisibleChange = { [weak controller] visible in
+            if controller?.keyboardVisible != visible {
+                controller?.keyboardVisible = visible
+            }
+        }
         controller.view = view
         return view
     }
