@@ -4,7 +4,8 @@
 //! The background process listens on 127.0.0.1 at a random port and writes
 //! the port to `control.port` in the config directory. A request is one
 //! line (the command), the reply is a TOML [`Status`]; then the connection
-//! closes.
+//! closes. The Windows service's agent answers the same way on
+//! `service.port` (see [`crate::service`]).
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream};
@@ -32,6 +33,28 @@ pub struct Status {
     /// macOS permissions the running server lacks: "accessibility",
     /// "screen_recording".
     pub missing: Vec<String>,
+    /// The Windows service runs the server, so it is also reachable on the
+    /// lock screen and before anyone signs in.
+    pub service: bool,
+}
+
+/// Who answers on the control channel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Endpoint {
+    /// `vnc-beach --background`, the tray icon process.
+    Tray,
+    /// The Windows service's agent in the console session.
+    Service,
+}
+
+impl Endpoint {
+    fn port_file(self) -> Option<PathBuf> {
+        let name = match self {
+            Endpoint::Tray => "control.port",
+            Endpoint::Service => "service.port",
+        };
+        config_dir().map(|d| d.join(name))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,13 +92,14 @@ impl Command {
     }
 }
 
-fn port_file() -> Option<PathBuf> {
-    config_dir().map(|d| d.join("control.port"))
+/// Sends a command to the background process, or to the Windows service if
+/// no background process runs. `None` if neither answers.
+pub fn call(cmd: Command) -> Option<Status> {
+    call_at(Endpoint::Tray, cmd).or_else(|| call_at(Endpoint::Service, cmd))
 }
 
-/// Sends a command to the background process. `None` if none is running.
-pub fn call(cmd: Command) -> Option<Status> {
-    let port: u16 = fs::read_to_string(port_file()?).ok()?.trim().parse().ok()?;
+pub fn call_at(endpoint: Endpoint, cmd: Command) -> Option<Status> {
+    let port: u16 = fs::read_to_string(endpoint.port_file()?).ok()?.trim().parse().ok()?;
     call_port(port, cmd)
 }
 
@@ -91,13 +115,13 @@ fn call_port(port: u16, cmd: Command) -> Option<Status> {
 
 /// Starts answering commands on a loopback port and records that port.
 /// Returns the port.
-pub fn serve<F>(handler: F) -> io::Result<u16>
+pub fn serve<F>(endpoint: Endpoint, handler: F) -> io::Result<u16>
 where
     F: Fn(Command) -> Status + Send + 'static,
 {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
     let port = listener.local_addr()?.port();
-    if let Some(path) = port_file() {
+    if let Some(path) = endpoint.port_file() {
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir)?;
         }
@@ -129,8 +153,8 @@ fn answer(stream: TcpStream, handler: &impl Fn(Command) -> Status) -> io::Result
 }
 
 /// Forgets the recorded port (on exit).
-pub fn forget() {
-    if let Some(path) = port_file() {
+pub fn forget(endpoint: Endpoint) {
+    if let Some(path) = endpoint.port_file() {
         let _ = fs::remove_file(path);
     }
 }

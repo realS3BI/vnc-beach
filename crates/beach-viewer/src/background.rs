@@ -1,6 +1,10 @@
 //! `vnc-beach --background`: the tray icon process that runs the server.
 //! It answers the viewer over [`crate::control`] and starts the viewer
-//! window on a click.
+//! window on a click. When the Windows service is set up, the service runs
+//! the server instead (same [`State`], without tray, see [`run_agent`]) and
+//! the tray process only shows and controls it. On macOS the same agent
+//! serves the login window. At start the tray process sets that up
+//! ([`service::ensure`]).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -13,40 +17,30 @@ use winit::application::ApplicationHandler;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 
 use crate::config::{self, Config};
-use crate::control::{self, Command, Status};
-use crate::{autostart, icon};
+use crate::control::{self, Command, Endpoint, Status};
+use crate::{autostart, icon, service};
 
 pub fn run() -> anyhow::Result<()> {
-    if control::call(Command::Status).is_some() {
+    if control::call_at(Endpoint::Tray, Command::Status).is_some() {
         log::info!("background process already running");
         return Ok(());
     }
-    let state = Arc::new(Mutex::new(State::load()));
+    let state = Arc::new(Mutex::new(State::load(Role::Tray, None)));
     state.lock().unwrap().apply();
     let quit = Arc::new(AtomicBool::new(false));
-    control::serve({
+    control::serve(Endpoint::Tray, {
         let (state, quit) = (state.clone(), quit.clone());
-        move |cmd| {
+        move |cmd| handle(&state, &quit, cmd)
+    })?;
+    // May wait on the administrator prompt; once the Windows service runs,
+    // the tray hands the server over to it.
+    std::thread::Builder::new().name("service-setup".into()).spawn({
+        let state = state.clone();
+        move || {
+            service::ensure();
             let mut st = state.lock().unwrap();
-            match cmd {
-                Command::Status => {}
-                Command::Start => {
-                    st.config.server.enabled = true;
-                    st.save();
-                    st.apply();
-                }
-                Command::Stop => {
-                    st.config.server.enabled = false;
-                    st.save();
-                    st.apply();
-                }
-                Command::Reload => {
-                    st.config = config::load();
-                    st.apply();
-                }
-                Command::Quit => quit.store(true, Ordering::Release),
-            }
-            st.status()
+            st.config = config::load();
+            st.apply();
         }
     })?;
 
@@ -67,12 +61,90 @@ pub fn run() -> anyhow::Result<()> {
         refreshed: Instant::now(),
     };
     event_loop.run_app(&mut tray)?;
-    control::forget();
+    control::forget(Endpoint::Tray);
     Ok(())
+}
+
+/// `vnc-beach --service-agent`: the server as the Windows service (or the
+/// macOS login window agent) runs it, without a tray icon. `home` is the
+/// root for file transfers.
+pub fn run_agent(home: Option<std::path::PathBuf>) -> anyhow::Result<()> {
+    let state = Arc::new(Mutex::new(State::load(Role::Agent, home)));
+    state.lock().unwrap().apply();
+    let quit = Arc::new(AtomicBool::new(false));
+    control::serve(Endpoint::Service, {
+        let (state, quit) = (state.clone(), quit.clone());
+        move |cmd| handle(&state, &quit, cmd)
+    })?;
+    // The main queue has to run on macOS: the input thread reads the
+    // keyboard layout there (see `beach_server::keymap`).
+    #[cfg(target_os = "macos")]
+    {
+        std::thread::spawn(move || {
+            agent_loop(&state, &quit);
+            std::process::exit(0);
+        });
+        dispatch2::dispatch_main()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        agent_loop(&state, &quit);
+        Ok(())
+    }
+}
+
+fn agent_loop(state: &Mutex<State>, quit: &AtomicBool) {
+    while !quit.load(Ordering::Acquire) {
+        std::thread::sleep(Duration::from_secs(5));
+        // Right after the service was set up, the tray process's own server
+        // may still hold the port: keep trying.
+        let mut st = state.lock().unwrap();
+        if st.error.is_some() {
+            st.apply();
+        }
+    }
+    if let Some(server) = state.lock().unwrap().server.take() {
+        server.stop();
+    }
+    control::forget(Endpoint::Service);
+}
+
+fn handle(state: &Mutex<State>, quit: &AtomicBool, cmd: Command) -> Status {
+    let mut st = state.lock().unwrap();
+    match cmd {
+        Command::Status => {}
+        Command::Start => {
+            st.config.server.enabled = true;
+            st.save();
+            st.apply();
+        }
+        Command::Stop => {
+            st.config.server.enabled = false;
+            st.save();
+            st.apply();
+        }
+        Command::Reload => {
+            st.config = config::load();
+            st.apply();
+        }
+        Command::Quit => quit.store(true, Ordering::Release),
+    }
+    st.status()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Role {
+    /// The tray icon process.
+    Tray,
+    /// Started by the Windows service as SYSTEM in the console session.
+    Agent,
 }
 
 /// The server and its configuration.
 struct State {
+    role: Role,
+    /// Root for file transfers (agent: the user's profile).
+    home: Option<std::path::PathBuf>,
     config: Config,
     server: Option<Server>,
     /// Options the running server was started with.
@@ -81,7 +153,7 @@ struct State {
 }
 
 impl State {
-    fn load() -> State {
+    fn load(role: Role, home: Option<std::path::PathBuf>) -> State {
         let mut config = config::load();
         if config.server.password.is_empty() {
             config.server.password = beach_server::random_password();
@@ -91,12 +163,14 @@ impl State {
         }
         // The config decides; the registry entry follows it (and the exe path
         // in it stays current after the program was moved).
-        if autostart::supported() && config.server.autostart {
+        if role == Role::Tray && autostart::supported() && config.server.autostart {
             if let Err(e) = autostart::set(true) {
                 log::warn!("autostart: {e}");
             }
         }
         State {
+            role,
+            home,
             config,
             server: None,
             running: None,
@@ -114,11 +188,27 @@ impl State {
             fps: s.fps.max(1),
             view_only: s.view_only,
             name: None,
+            home: self.home.clone(),
         }
+    }
+
+    /// The tray process leaves the server to the Windows service once that
+    /// is set up.
+    fn delegated(&self) -> bool {
+        self.role == Role::Tray && service::runs_server()
     }
 
     /// Starts, stops or restarts the server so it matches the config.
     fn apply(&mut self) {
+        if self.delegated() {
+            if let Some(server) = self.server.take() {
+                server.stop();
+            }
+            self.running = None;
+            self.error = None;
+            control::call_at(Endpoint::Service, Command::Reload);
+            return;
+        }
         let wanted = self.config.server.enabled.then(|| self.options());
         if wanted == self.running {
             return;
@@ -175,6 +265,20 @@ impl State {
     }
 
     fn status(&self) -> Status {
+        if self.delegated() {
+            let s = &self.config.server;
+            let mut status = control::call_at(Endpoint::Service, Command::Status).unwrap_or_else(|| Status {
+                enabled: s.enabled,
+                port: s.port,
+                password: s.password.clone(),
+                error: Some("Der Windows-Dienst von VNC Beach antwortet nicht.".into()),
+                ..Status::default()
+            });
+            status.pid = std::process::id();
+            status.autostart = autostart::enabled();
+            status.service = true;
+            return status;
+        }
         Status {
             missing: self.missing(),
             pid: std::process::id(),
@@ -184,7 +288,9 @@ impl State {
             password: self.config.server.password.clone(),
             viewers: self.server.as_ref().map(|s| s.viewers()).unwrap_or_default(),
             error: self.error.clone(),
-            autostart: autostart::enabled(),
+            // The agent runs as SYSTEM and can't see the user's Run key.
+            autostart: self.role == Role::Tray && autostart::enabled(),
+            service: self.role == Role::Agent,
         }
     }
 }
@@ -256,7 +362,13 @@ impl Tray {
             st.retry_input();
             st.status()
         };
-        let text = if status.running {
+        let text = if status.running && status.service {
+            match status.viewers.len() {
+                0 => format!("Windows-Dienst online, Port {}", status.port),
+                1 => format!("Windows-Dienst online, Port {}, 1 Zuschauer", status.port),
+                n => format!("Windows-Dienst online, Port {}, {n} Zuschauer", status.port),
+            }
+        } else if status.running {
             let viewers = match status.viewers.len() {
                 0 => format!("Server online, Port {}", status.port),
                 1 => format!("Server online, Port {}, 1 Zuschauer", status.port),

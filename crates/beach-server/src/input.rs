@@ -81,6 +81,8 @@ struct State {
 
 impl State {
     fn handle(&mut self, event: Event) {
+        #[cfg(windows)]
+        crate::desktop::follow_input();
         let result = match event {
             Event::Pointer {
                 buttons,

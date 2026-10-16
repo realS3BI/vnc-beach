@@ -24,6 +24,8 @@ pub struct Context {
     pub input: Option<Input>,
     pub password: Option<String>,
     pub file_transfer: bool,
+    /// Root for file transfers; the server user's home directory if `None`.
+    pub home: Option<std::path::PathBuf>,
     pub fps: u32,
     pub name: String,
     /// Set when the server shuts down; sessions end at their next tick.
@@ -202,7 +204,7 @@ impl Session {
                 self.layout_announced = false;
                 if ctx.file_transfer && encs.contains(&encoding::BEACH_FILE_TRANSFER) {
                     if self.files.is_none() {
-                        match crate::files::Session::home() {
+                        match crate::files::Session::home(ctx.home.as_deref()) {
                             Ok(files) => {
                                 files.hello().write(&mut self.out)?;
                                 self.out.flush()?;

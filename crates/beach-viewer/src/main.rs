@@ -13,6 +13,7 @@ mod icon;
 mod keys;
 mod server_panel;
 mod servers;
+mod service;
 mod settings;
 mod theme;
 mod update;
@@ -28,11 +29,41 @@ struct Args {
     /// Started at login when autostart is on.
     #[arg(long)]
     background: bool,
+    /// Windows service entry point (started by the service control manager).
+    #[arg(long, hide = true)]
+    service: bool,
+    /// The server as the Windows service runs it in the console session.
+    #[arg(long, hide = true)]
+    service_agent: bool,
+    /// Set up the Windows service (needs administrator rights).
+    #[arg(long, hide = true)]
+    install_service: bool,
+    /// Remove the Windows service (needs administrator rights).
+    #[arg(long, hide = true)]
+    uninstall_service: bool,
+    /// Config directory to use instead of the current user's.
+    #[arg(long, hide = true)]
+    config_dir: Option<std::path::PathBuf>,
+    /// Root for file transfers (service agent).
+    #[arg(long, hide = true)]
+    home: Option<std::path::PathBuf>,
 }
 
 fn main() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let args = Args::parse();
+    init_logging(&args);
+    if let Some(dir) = &args.config_dir {
+        servers::set_config_dir(dir.clone());
+    }
+    if args.service || args.service_agent || args.install_service || args.uninstall_service {
+        std::process::exit(match run_service_mode(&args) {
+            Ok(()) => 0,
+            Err(e) => {
+                log::error!("{e:#}");
+                1
+            }
+        });
+    }
     if args.background {
         if let Err(e) = background::run() {
             log::error!("background process failed: {e:#}");
@@ -58,4 +89,54 @@ fn main() {
         log::error!("viewer failed: {e}");
         std::process::exit(1);
     }
+}
+
+/// The service modes have no console: they log to a file in
+/// `%ProgramData%\VNC Beach`.
+fn init_logging(args: &Args) {
+    let file = if args.service {
+        "service.log"
+    } else if args.service_agent {
+        "agent.log"
+    } else if args.install_service || args.uninstall_service {
+        "setup.log"
+    } else {
+        ""
+    };
+    let default = if file.is_empty() { "warn" } else { "info" };
+    let mut builder = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default));
+    if let Some(log) = Some(file).filter(|f| !f.is_empty()).and_then(service::log_path) {
+        if let Ok(log) = std::fs::File::create(log) {
+            builder.target(env_logger::Target::Pipe(Box::new(log)));
+        }
+    }
+    builder.init();
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+fn run_service_mode(args: &Args) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    let paths = || -> anyhow::Result<service::Paths> {
+        Ok(service::Paths {
+            config_dir: args.config_dir.clone().context("--config-dir missing")?,
+            home: args.home.clone().context("--home missing")?,
+        })
+    };
+    if args.service {
+        #[cfg(windows)]
+        return service::run_service(paths()?);
+        #[cfg(not(windows))]
+        anyhow::bail!("--service is Windows only");
+    } else if args.service_agent {
+        background::run_agent(args.home.clone())
+    } else if args.install_service {
+        service::install(&paths()?)
+    } else {
+        service::uninstall()
+    }
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn run_service_mode(_args: &Args) -> anyhow::Result<()> {
+    anyhow::bail!("the service is only available on Windows and macOS")
 }

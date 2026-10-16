@@ -73,6 +73,7 @@ fn main() -> anyhow::Result<()> {
         fps: args.fps,
         view_only: args.view_only,
         name: None,
+        home: None,
     })?;
     serve_forever()
 }

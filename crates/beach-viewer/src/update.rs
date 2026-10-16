@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
-use crate::control::{self, Command as ControlCommand};
+use crate::control::{self, Command as ControlCommand, Endpoint};
 
 /// Where releases are published.
 pub const REPO: &str = "realS3BI/vnc-beach";
@@ -184,12 +184,12 @@ fn is_translocated(exe: &Path) -> bool {
 
 /// Stops a running background process; returns true if there was one.
 fn stop_background() -> bool {
-    if control::call(ControlCommand::Status).is_none() {
+    if control::call_at(Endpoint::Tray, ControlCommand::Status).is_none() {
         return false;
     }
-    control::call(ControlCommand::Quit);
+    control::call_at(Endpoint::Tray, ControlCommand::Quit);
     let until = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < until && control::call(ControlCommand::Status).is_some() {
+    while Instant::now() < until && control::call_at(Endpoint::Tray, ControlCommand::Status).is_some() {
         std::thread::sleep(Duration::from_millis(200));
     }
     true

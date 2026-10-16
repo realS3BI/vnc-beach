@@ -166,6 +166,8 @@ impl Screen {
         std::thread::Builder::new()
             .name("capture".into())
             .spawn(move || {
+                #[cfg(windows)]
+                crate::desktop::follow_input();
                 let source = match open(display) {
                     Ok((source, first)) => {
                         let _ = init_tx.send(Ok(first));
@@ -222,6 +224,10 @@ impl Screen {
                 continue;
             }
             let started = Instant::now();
+            // Lock screen and UAC prompts are a different desktop (only
+            // reachable when running as the Windows service).
+            #[cfg(windows)]
+            crate::desktop::follow_input();
             match grab_all(&source) {
                 Ok(frame) => {
                     failures = 0;

@@ -3,6 +3,8 @@
 
 pub mod capture;
 pub mod clipboard;
+#[cfg(windows)]
+pub mod desktop;
 pub mod files;
 pub mod input;
 #[cfg(target_os = "macos")]
@@ -34,6 +36,9 @@ pub struct Options {
     /// (macOS)` / `(Windows)`. The suffix lets the viewer pick the right
     /// Ctrl/Cmd mapping.
     pub name: Option<String>,
+    /// Root for file transfers. The Windows service runs as SYSTEM and sets
+    /// the signed-in user's profile here; `None` is the current user's home.
+    pub home: Option<std::path::PathBuf>,
 }
 
 impl Default for Options {
@@ -46,6 +51,7 @@ impl Default for Options {
             fps: 60,
             view_only: false,
             name: None,
+            home: None,
         }
     }
 }
@@ -93,6 +99,7 @@ impl Server {
             clipboard,
             input,
             file_transfer: !opts.view_only,
+            home: opts.home,
             password: opts.password,
             fps: opts.fps,
             name: opts.name.unwrap_or_else(|| {

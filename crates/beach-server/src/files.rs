@@ -66,26 +66,38 @@ enum Transfer {
 
 pub struct Session {
     root: PathBuf,
+    /// Where the viewer starts browsing, if not the system's Downloads folder.
+    downloads: Option<PathBuf>,
     transfer: Transfer,
 }
 
 impl Session {
-    pub fn home() -> io::Result<Self> {
-        Self::new(
-            dirs::home_dir()
-                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "home directory unavailable"))?,
-        )
+    /// Rooted at `home`, or the home directory of the user running the server.
+    pub fn home(home: Option<&Path>) -> io::Result<Self> {
+        let Some(home) = home else {
+            return Self::new(
+                dirs::home_dir()
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "home directory unavailable"))?,
+            );
+        };
+        let mut session = Self::new(home.to_path_buf())?;
+        session.downloads = Some(home.join("Downloads"));
+        Ok(session)
     }
 
     pub fn new(root: PathBuf) -> io::Result<Self> {
         Ok(Self {
             root: root.canonicalize()?,
+            downloads: None,
             transfer: Transfer::Idle,
         })
     }
 
     pub fn hello(&self) -> Response {
-        let initial = dirs::download_dir()
+        let initial = self
+            .downloads
+            .clone()
+            .or_else(dirs::download_dir)
             .and_then(|p| p.canonicalize().ok())
             .and_then(|p| p.strip_prefix(&self.root).ok().map(Path::to_path_buf))
             .and_then(|p| p.to_str().map(|s| s.replace('\\', "/")))

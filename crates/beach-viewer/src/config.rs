@@ -40,6 +40,13 @@ pub struct ServerConfig {
     #[serde(with = "servers::obfuscated")]
     pub password: String,
     pub view_only: bool,
+    /// Also reachable before sign-in: the Windows service, or the macOS
+    /// login window agent. Set up on its own at start (see
+    /// [`crate::service::ensure`]).
+    pub service: bool,
+    /// Version for which the administrator prompt was declined; not asked
+    /// again until the next version.
+    pub service_declined: String,
     /// `"all"` (default), `"primary"` or an index as listed by
     /// `beach-server --list-displays`.
     #[serde(with = "display_toml")]
@@ -83,6 +90,8 @@ impl Default for ServerConfig {
             port: 5900,
             password: String::new(),
             view_only: false,
+            service: true,
+            service_declined: String::new(),
             display: Display::All,
             fps: 60,
         }

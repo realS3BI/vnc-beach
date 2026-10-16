@@ -9,9 +9,9 @@ use egui::{CornerRadius, Margin, RichText, Vec2};
 
 use crate::theme::{self, Kind, Palette};
 
-use crate::autostart;
 use crate::config::{self, Config, ServerConfig};
-use crate::control::{self, Command, Status};
+use crate::{autostart, service};
+use crate::control::{self, Command, Endpoint, Status};
 
 pub struct ServerPanel {
     /// Latest poll: `None` if no background process answers.
@@ -27,17 +27,26 @@ pub struct ServerPanel {
 }
 
 impl ServerPanel {
-    /// Starts polling the background process every two seconds.
+    /// Starts the background process if none runs (it sets up autostart and
+    /// the service on a fresh installation), then polls it every two seconds.
     pub fn new(ctx: egui::Context) -> Self {
         let (tx, polls) = channel();
         std::thread::Builder::new()
             .name("server-status".into())
-            .spawn(move || loop {
-                if tx.send(control::call(Command::Status)).is_err() {
-                    break;
+            .spawn(move || {
+                if control::call_at(Endpoint::Tray, Command::Status).is_none() {
+                    if let Err(e) = Self::start_background() {
+                        log::warn!("cannot start the background process: {e}");
+                    }
+                    std::thread::sleep(Duration::from_secs(1));
                 }
-                ctx.request_repaint();
-                std::thread::sleep(Duration::from_secs(2));
+                loop {
+                    if tx.send(control::call(Command::Status)).is_err() {
+                        break;
+                    }
+                    ctx.request_repaint();
+                    std::thread::sleep(Duration::from_secs(2));
+                }
             })
             .expect("spawn status thread");
         ServerPanel {
@@ -79,14 +88,58 @@ impl ServerPanel {
     /// Quits the background process and starts a fresh one, which picks up
     /// permissions macOS only grants to new processes.
     fn restart_background(&mut self) {
-        if control::call(Command::Quit).is_some() {
+        if control::call_at(Endpoint::Tray, Command::Quit).is_some() {
             let until = std::time::Instant::now() + Duration::from_secs(5);
-            while std::time::Instant::now() < until && control::call(Command::Status).is_some() {
+            while std::time::Instant::now() < until && control::call_at(Endpoint::Tray, Command::Status).is_some() {
                 std::thread::sleep(Duration::from_millis(200));
             }
         }
         self.status = None;
         self.error = Self::start_background().err();
+    }
+
+    /// Sets the service up or removes it to match the settings. Asks for
+    /// administrator rights.
+    fn apply_service(config: &mut Config) -> Result<(), String> {
+        if !service::supported() {
+            return Ok(());
+        }
+        if !config.server.service {
+            if service::installed() {
+                service::request_uninstall().map_err(|e| e.to_string())?;
+            }
+            return Ok(());
+        }
+        if service::needs_setup().is_none() {
+            return Ok(());
+        }
+        // Asked for explicitly: forget an earlier "no".
+        if !config.server.service_declined.is_empty() {
+            config.server.service_declined.clear();
+            let _ = config::save(config);
+        }
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        service::request_install(&exe).map_err(|e| e.to_string())
+    }
+
+    /// macOS: Tailscale's apps only run after sign-in; offer the daemon.
+    #[cfg(target_os = "macos")]
+    fn tailscale_row(ui: &mut egui::Ui, error: &mut Option<String>) {
+        ui.add_space(6.0);
+        if service::tailscale_daemon_installed() {
+            ui.weak("Tailscale läuft als Dienst und ist schon vor der Anmeldung verbunden.");
+            return;
+        }
+        ui.weak(
+            "Die Tailscale-App verbindet sich erst nach der Anmeldung. Für den Zugriff nach einem \
+             Neustart braucht es den Tailscale-Dienst; die Umstellung läuft im Terminal und nur \
+             direkt am Mac.",
+        );
+        if ui.small_button("Tailscale-Dienst einrichten …").clicked() {
+            if let Err(e) = service::tailscale_daemon_script() {
+                *error = Some(format!("Terminal lässt sich nicht öffnen: {e}"));
+            }
+        }
     }
 
     /// The status block for the sidebar.
@@ -209,6 +262,9 @@ impl ServerPanel {
                     );
                     ui.label(format!("Online auf Port {}, {viewers}", s.port));
                 });
+                if s.service {
+                    ui.weak("Läuft als Windows-Dienst, auch im Sperrbildschirm erreichbar.");
+                }
                 if missing("accessibility") {
                     ui.add_space(4.0);
                     ui.label(
@@ -293,6 +349,27 @@ impl ServerPanel {
                     autostart::supported(),
                     egui::Checkbox::new(&mut draft.autostart, "Hintergrunddienst beim Anmelden starten"),
                 );
+                if service::supported() {
+                    if cfg!(windows) {
+                        ui.checkbox(
+                            &mut draft.service,
+                            "Auch im Sperrbildschirm und vor der Anmeldung erreichbar",
+                        );
+                        ui.weak(
+                            "Richtet einen Windows-Dienst ein, der mit Windows startet, und stellt \
+                             Tailscale so ein, dass es ohne Anmeldung läuft. Windows fragt dafür nach \
+                             Administratorrechten.",
+                        );
+                    } else {
+                        ui.checkbox(&mut draft.service, "Auch am Anmeldefenster erreichbar");
+                        ui.weak(
+                            "Startet den Server auch am Anmeldefenster des Macs. macOS fragt dafür einmal \
+                             nach dem Passwort eines Administrators.",
+                        );
+                    }
+                }
+                #[cfg(target_os = "macos")]
+                Self::tailscale_row(ui, &mut self.error);
                 ui.add_space(8.0);
                 egui::Grid::new("server-settings")
                     .num_columns(2)
@@ -377,6 +454,9 @@ impl ServerPanel {
                 if let Err(e) = autostart::set(config.server.autostart) {
                     self.error = Some(format!("Autostart: {e}"));
                 }
+            }
+            if let Err(e) = Self::apply_service(config) {
+                self.error = Some(e);
             }
             if self.status.is_some() {
                 self.command(Command::Reload);

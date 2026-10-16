@@ -187,9 +187,20 @@ fn default_path() -> Option<PathBuf> {
     config_dir().map(|d| d.join("servers.toml"))
 }
 
+/// Set by the Windows service: it runs as SYSTEM but serves the
+/// configuration of the user who set it up.
+static CONFIG_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+pub fn set_config_dir(dir: PathBuf) {
+    let _ = CONFIG_DIR.set(dir);
+}
+
 /// `~/Library/Application Support/vnc-beach` on macOS,
 /// `%APPDATA%\vnc-beach` on Windows, XDG config dir elsewhere.
 pub fn config_dir() -> Option<PathBuf> {
+    if let Some(dir) = CONFIG_DIR.get() {
+        return Some(dir.clone());
+    }
     let base = if cfg!(target_os = "macos") {
         PathBuf::from(std::env::var_os("HOME")?).join("Library/Application Support")
     } else if cfg!(windows) {
