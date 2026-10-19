@@ -10,7 +10,7 @@ name = "beach_mobile"
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-rfb = { version = "0.2.3", path = "../rfb" }
+rfb = { version = "0.2.4", path = "../rfb" }
 
 [lints]
 workspace = true
