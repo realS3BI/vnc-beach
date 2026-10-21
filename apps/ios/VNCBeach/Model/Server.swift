@@ -7,6 +7,8 @@ struct Server: Identifiable, Codable, Hashable {
     /// What the user typed: `sebastian-pc`, `10.0.0.2:1`, `host::5901`, …
     var host: String
     var viewOnly = false
+    /// Optional so favourites saved by older app versions still decode.
+    var access: AccessSettings?
 
     var displayName: String {
         name.trimmingCharacters(in: .whitespaces).isEmpty ? host : name

@@ -1,6 +1,8 @@
 // No console window next to the viewer on Windows (release builds).
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod access;
+mod access_ui;
 mod app;
 mod autostart;
 mod background;
@@ -11,6 +13,8 @@ mod control;
 mod files;
 mod icon;
 mod keys;
+#[cfg(target_os = "macos")]
+mod mac_server;
 mod server_panel;
 mod servers;
 mod service;
@@ -41,6 +45,12 @@ struct Args {
     /// Remove the Windows service (needs administrator rights).
     #[arg(long, hide = true)]
     uninstall_service: bool,
+    /// Explicit opt-in to unattended macOS startup; password is JSON on stdin.
+    #[arg(long, hide = true)]
+    install_server_mode: bool,
+    /// Start user services too, then lock the desktop after login.
+    #[arg(long, hide = true, requires = "install_server_mode")]
+    automatic_login: bool,
     /// Config directory to use instead of the current user's.
     #[arg(long, hide = true)]
     config_dir: Option<std::path::PathBuf>,
@@ -55,7 +65,7 @@ fn main() {
     if let Some(dir) = &args.config_dir {
         servers::set_config_dir(dir.clone());
     }
-    if args.service || args.service_agent || args.install_service || args.uninstall_service {
+    if args.service || args.service_agent || args.install_service || args.uninstall_service || args.install_server_mode {
         std::process::exit(match run_service_mode(&args) {
             Ok(()) => 0,
             Err(e) => {
@@ -98,7 +108,7 @@ fn init_logging(args: &Args) {
         "service.log"
     } else if args.service_agent {
         "agent.log"
-    } else if args.install_service || args.uninstall_service {
+    } else if args.install_service || args.uninstall_service || args.install_server_mode {
         "setup.log"
     } else {
         ""
@@ -122,7 +132,12 @@ fn run_service_mode(args: &Args) -> anyhow::Result<()> {
             home: args.home.clone().context("--home missing")?,
         })
     };
-    if args.service {
+    if args.install_server_mode {
+        #[cfg(target_os = "macos")]
+        return mac_server::install(&paths()?, args.automatic_login);
+        #[cfg(not(target_os = "macos"))]
+        anyhow::bail!("--install-server-mode is macOS only");
+    } else if args.service {
         #[cfg(windows)]
         return service::run_service(paths()?);
         #[cfg(not(windows))]

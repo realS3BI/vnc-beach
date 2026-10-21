@@ -30,6 +30,21 @@ enum {
 // only valid during the call.
 typedef void (*BeachEventCallback)(void *context, int32_t kind, const char *text);
 
+// Nonblocking connection preparation. Calls on one handle must be serialized.
+// action: 0 connect, 1 SSH sign-in, 2 Wake-on-LAN. Poll yields owned JSON
+// (progress/trust/secret/connected/failed); release it with beach_string_free.
+// The callback context lives until free, or until the transferred session ends.
+typedef struct BeachConnection BeachConnection;
+bool beach_access_validate(const char *json, char *error, size_t error_len);
+BeachConnection *beach_connection_start(const char *address, const char *password,
+    const char *access_json, int32_t action, const char *known_hosts_dir, uint8_t depth,
+    BeachEventCallback callback, void *context, char *error, size_t error_len);
+char *beach_connection_poll(BeachConnection *connection);
+bool beach_connection_answer(BeachConnection *connection, uint64_t id, int32_t kind, const char *value);
+BeachSession *beach_connection_take_session(BeachConnection *connection);
+void beach_connection_free(BeachConnection *connection);
+void beach_string_free(char *text);
+
 // One of the server's displays inside the framebuffer.
 typedef struct BeachScreen {
     uint32_t id;

@@ -61,6 +61,8 @@ impl std::fmt::Display for SetupError {
 /// system's administrator prompt; a declined prompt isn't repeated for this
 /// version.
 pub fn ensure() {
+    #[cfg(target_os = "macos")]
+    crate::mac_server::ensure();
     if !supported() {
         return;
     }
@@ -224,9 +226,6 @@ mod platform {
 }
 
 #[cfg(target_os = "macos")]
-pub use platform::{tailscale_daemon_installed, tailscale_daemon_script};
-
-#[cfg(target_os = "macos")]
 mod platform {
     use std::path::{Path, PathBuf};
     use std::process::Command;
@@ -234,7 +233,6 @@ mod platform {
     use super::{applescript_string, sh_quote, Paths, SetupError};
 
     const LABEL: &str = "at.schlossers.vnc-beach.loginwindow";
-    const TAILSCALED_PLIST: &str = "/Library/LaunchDaemons/com.tailscale.tailscaled.plist";
 
     fn plist_path() -> PathBuf {
         PathBuf::from("/Library/LaunchAgents").join(format!("{LABEL}.plist"))
@@ -295,7 +293,9 @@ mod platform {
         let exe = bundled_exe()?;
         let paths = Paths::current()?;
         match std::fs::read_to_string(plist_path()) {
-            Ok(text) if text == plist(&exe, &paths) => None,
+            Ok(text) if text == plist(&exe, &paths) => {
+                crate::mac_server::needs_refresh().then_some("unattended startup files outdated")
+            }
             Ok(_) => Some("login window agent outdated"),
             Err(_) => Some("login window agent missing"),
         }
@@ -346,6 +346,7 @@ mod platform {
         std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o644))?;
         std::fs::rename(&tmp, &path)?;
         log::info!("wrote {}", path.display());
+        crate::mac_server::refresh()?;
         Ok(())
     }
 
@@ -355,30 +356,6 @@ mod platform {
             _ => Ok(()),
         }
     }
-
-    /// Whether Tailscale's open source daemon runs as a system service.
-    pub fn tailscale_daemon_installed() -> bool {
-        Path::new(TAILSCALED_PLIST).exists()
-    }
-
-    /// Opens Terminal with a script that switches Tailscale to the
-    /// `tailscaled` variant, the only one that runs before sign-in. It
-    /// needs Homebrew, the user's password and a browser sign-in, and
-    /// Tailscale drops out in between, so it runs where the user sees it.
-    pub fn tailscale_daemon_script() -> Result<(), String> {
-        use std::os::unix::fs::PermissionsExt;
-        let path = std::env::temp_dir().join("VNC Beach – Tailscale einrichten.command");
-        std::fs::write(&path, TAILSCALE_SCRIPT).map_err(|e| e.to_string())?;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
-        Command::new("open")
-            .args(["-a", "Terminal"])
-            .arg(&path)
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| e.to_string())
-    }
-
-    const TAILSCALE_SCRIPT: &str = include_str!("tailscale-daemon.sh");
 
     #[cfg(test)]
     mod tests {

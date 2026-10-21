@@ -7,7 +7,7 @@
 //!
 //! [server]
 //! enabled = true
-//! port = 5900
+//! port = 5901
 //! password = "dbd83cfd727a1458"   # vncpasswd format, hex
 //! ```
 
@@ -87,7 +87,9 @@ impl Default for ServerConfig {
         ServerConfig {
             enabled: true,
             autostart: true,
-            port: 5900,
+            // 5900 is the VNC standard, but macOS Screen Sharing usually
+            // holds it already.
+            port: 5901,
             password: String::new(),
             view_only: false,
             service: true,
@@ -157,7 +159,7 @@ mod tests {
         let mut config = Config::default();
         config.viewer.colors = Colors::Medium;
         config.server.password = "geheim".into();
-        config.server.port = 5901;
+        config.server.port = 5999;
         save_to(&config, &path).unwrap();
         let text = fs::read_to_string(&path).unwrap();
         assert!(!text.contains("geheim"), "{text}");

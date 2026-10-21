@@ -45,7 +45,7 @@ impl Default for Options {
     fn default() -> Self {
         Options {
             bind: "0.0.0.0".into(),
-            port: 5900,
+            port: 5901,
             password: None,
             display: Display::All,
             fps: 60,

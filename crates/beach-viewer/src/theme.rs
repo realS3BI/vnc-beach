@@ -341,6 +341,13 @@ impl<'a> Button<'a> {
             Sense::hover()
         };
         let (rect, response) = ui.allocate_exact_size(size, sense);
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Button,
+                self.enabled && ui.is_enabled(),
+                self.text,
+            )
+        });
         if !ui.is_rect_visible(rect) {
             return response;
         }
@@ -389,6 +396,14 @@ impl<'a> Button<'a> {
             StrokeKind::Inside,
         );
         painter.galley(rect.center() - galley.size() / 2.0, galley, text);
+        if self.enabled && response.has_focus() {
+            painter.rect_stroke(
+                rect.expand(2.0),
+                CornerRadius::same(11),
+                Stroke::new(2.0, p.accent),
+                StrokeKind::Outside,
+            );
+        }
         if self.enabled {
             response.on_hover_cursor(CursorIcon::PointingHand)
         } else {
@@ -421,7 +436,7 @@ pub fn avatar(name: &str) -> (Color32, Color32, String) {
     let text = if light_text { Color32::WHITE } else { INK };
     let mut words = name.split_whitespace().filter_map(|w| w.chars().next());
     let mut monogram: String = words.next().into_iter().collect();
-    if let Some(last) = words.last() {
+    if let Some(last) = words.next_back() {
         monogram.push(last);
     }
     if monogram.is_empty() {

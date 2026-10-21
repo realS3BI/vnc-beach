@@ -1,0 +1,21 @@
+[package]
+name = "beach-access"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shared connection preparation for VNC Beach clients"
+
+[dependencies]
+anyhow = "1"
+rfb = { version = "0.2.4", path = "../rfb" }
+serde = { version = "1", features = ["derive"] }
+ssh2 = { version = "0.9.6", features = ["vendored-openssl", "openssl-on-win32"] }
+base64 = "0.22"
+sha2 = "0.10"
+zeroize = "1"
+
+[dev-dependencies]
+tempfile = "3.27"
+
+[lints]
+workspace = true

@@ -47,65 +47,115 @@ final class RemoteSession {
 
     private var handle: SessionHandle?
     private var callbackBox: CallbackBox?
+    private var attempt: ConnectionAttempt?
+    private(set) var preparationStatus = "Verbindung wird geprüft …"
+    private(set) var preparationAction = ConnectionAction.connect
+    private(set) var prompt: AccessPrompt?
 
-    func connect(address: String, password: String, depth: ColorDepth) async {
-        guard handle == nil else { return }
+    func connect(address: String, password: String, depth: ColorDepth,
+                 access: AccessSettings = AccessSettings(), action: ConnectionAction = .connect) async {
+        close()
         state = .connecting
         closedByUser = false
+        preparationAction = action
+        preparationStatus = "Verbindung wird geprüft …"
+        let prepared: PreparedAccess
+        do { prepared = try PreparedAccess(access, action: action) }
+        catch { state = .closed(error.localizedDescription); return }
         let box = CallbackBox()
         box.session = self
         callbackBox = box
-        let context = SendablePointer(raw: Unmanaged.passRetained(box).toOpaque())
-        let depthBits = UInt8(depth.rawValue)
-        let result: ConnectOutcome = await Task.detached {
-            var error = [CChar](repeating: 0, count: 512)
-            let pointer = beach_session_connect(
-                address, password.isEmpty ? nil : password, depthBits, sessionEventCallback,
-                context.raw, &error, error.count)
-            if let pointer {
-                return .connected(SessionHandle(pointer))
-            }
-            return .failed(cString(error))
-        }.value
-        switch result {
-        case .connected(let handle):
-            // `connect` may have been cancelled meanwhile (view went away).
-            guard callbackBox === box else {
-                beach_session_free(handle.pointer)
-                Unmanaged<CallbackBox>.fromOpaque(context.raw).release()
-                return
-            }
-            self.handle = handle
-            handle.context = context.raw
-            var buffer = [CChar](repeating: 0, count: 256)
-            beach_session_name(handle.pointer, &buffer, buffer.count)
-            name = cString(buffer)
-            remote = RemoteKind(rawValue: Int(beach_session_remote_kind(handle.pointer))) ?? .other
-            refreshSize()
-            refreshScreens()
-            state = .connected
-        case .failed(let message):
-            Unmanaged<CallbackBox>.fromOpaque(context.raw).release()
+        let context = Unmanaged.passRetained(box).toOpaque()
+        let hosts = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("VNC Beach/ssh_hosts").path
+        var error = [CChar](repeating: 0, count: 2048)
+        guard let job = beach_connection_start(address, password.isEmpty ? nil : password,
+            prepared.json, action.rawValue, hosts, UInt8(depth.rawValue), sessionEventCallback,
+            context, &error, error.count) else {
+            Unmanaged<CallbackBox>.fromOpaque(context).release()
             callbackBox = nil
-            state = .closed(Self.describe(message))
+            state = .closed(cString(error))
+            return
+        }
+        let current = ConnectionAttempt(job: job, context: context, prepared: prepared)
+        attempt = current
+        while attempt === current, !Task.isCancelled {
+            if let text = beach_connection_poll(job) {
+                let data = Data(String(cString: text).utf8)
+                beach_string_free(text)
+                do {
+                    switch try JSONDecoder().decode(PreparationEvent.self, from: data) {
+                    case .progress(let text): preparationStatus = text
+                    case .prompt(let question): prompt = question
+                    case .failed(let message):
+                        close()
+                        state = .closed(message)
+                        return
+                    case .connected:
+                        guard let pointer = beach_connection_take_session(job) else {
+                            throw AccessError.message("Die VNC-Verbindung konnte nicht übernommen werden.")
+                        }
+                        let handle = SessionHandle(pointer)
+                        handle.context = context
+                        self.handle = handle
+                        attempt = nil
+                        beach_connection_free(job)
+                        prompt = nil
+                        var buffer = [CChar](repeating: 0, count: 256)
+                        beach_session_name(pointer, &buffer, buffer.count)
+                        name = cString(buffer)
+                        remote = RemoteKind(rawValue: Int(beach_session_remote_kind(pointer))) ?? .other
+                        refreshSize()
+                        refreshScreens()
+                        state = .connected
+                        return
+                    }
+                } catch {
+                    close()
+                    state = .closed(error.localizedDescription)
+                    return
+                }
+            } else {
+                do { try await Task.sleep(for: .milliseconds(50)) }
+                catch { break }
+            }
+        }
+        // A replaced attempt belongs to its new caller; it must not be closed here.
+        if attempt === current { close(byUser: true) }
+    }
+
+    func answer(_ question: AccessPrompt, value: String? = nil) {
+        guard let attempt, prompt == question else { return }
+        let kind: Int32
+        switch question.question {
+        case .trust: kind = 0
+        case .secret: kind = 1
+        }
+        if beach_connection_answer(attempt.job, question.id, kind, value) {
+            prompt = nil
+        } else {
+            close()
+            state = .closed("Die SSH-Abfrage ist nicht mehr gültig. Bitte erneut verbinden.")
         }
     }
 
-    /// Closes the connection; safe to call repeatedly.
+    /// Closes both preparation and established sessions; safe to repeat.
     func close(byUser: Bool = false) {
-        if byUser {
-            closedByUser = true
-        }
+        if byUser { closedByUser = true }
         callbackBox = nil
-        guard let handle else { return }
-        self.handle = nil
-        // No callback runs after free returns, so the box can go now.
-        beach_session_free(handle.pointer)
-        if let context = handle.context {
-            Unmanaged<CallbackBox>.fromOpaque(context).release()
+        prompt = nil
+        if let current = attempt {
+            attempt = nil
+            beach_connection_free(current.job)
+            Unmanaged<CallbackBox>.fromOpaque(current.context).release()
+        }
+        if let handle {
+            self.handle = nil
+            beach_session_free(handle.pointer)
+            if let context = handle.context { Unmanaged<CallbackBox>.fromOpaque(context).release() }
         }
         if state == .connected || state == .connecting {
-            state = .closed(byUser ? "" : "Verbindung getrennt")
+            state = .closed(byUser ? "Verbindungsversuch abgebrochen" : "Verbindung getrennt")
         }
     }
 
@@ -189,7 +239,8 @@ final class RemoteSession {
         selectScreen(selectedScreen)
     }
 
-    fileprivate func handle(kind: Int32, text: String?) {
+    fileprivate func handle(kind: Int32, text: String?, source: CallbackBox) {
+        guard callbackBox === source else { return }
         switch Int(kind) {
         case BEACH_EVENT_FRAME:
             onFrame?()
@@ -259,9 +310,17 @@ enum RemoteKind: Int {
     var isMac: Bool { self != .other }
 }
 
-nonisolated private enum ConnectOutcome: Sendable {
-    case connected(SessionHandle)
-    case failed(String)
+private final class ConnectionAttempt {
+    let job: OpaquePointer
+    let context: UnsafeMutableRawPointer
+    // The protected identity files live until the polling task has also returned.
+    let prepared: PreparedAccess
+
+    init(job: OpaquePointer, context: UnsafeMutableRawPointer, prepared: PreparedAccess) {
+        self.job = job
+        self.context = context
+        self.prepared = prepared
+    }
 }
 
 /// Reads a NUL-terminated buffer.
@@ -270,17 +329,13 @@ nonisolated private func cString(_ buffer: [CChar]) -> String {
 }
 
 /// Session pointer owned by `RemoteSession`.
-nonisolated final class SessionHandle: @unchecked Sendable {
+private final class SessionHandle {
     let pointer: OpaquePointer
     var context: UnsafeMutableRawPointer?
 
     init(_ pointer: OpaquePointer) {
         self.pointer = pointer
     }
-}
-
-nonisolated struct SendablePointer: @unchecked Sendable {
-    let raw: UnsafeMutableRawPointer
 }
 
 /// Retained by the C side as callback context; only weakly knows the session.
@@ -305,7 +360,7 @@ nonisolated private func sessionEventCallback(
     let box = Unmanaged<CallbackBox>.fromOpaque(context).takeUnretainedValue()
     let message = text.map { String(cString: $0) }
     Task { @MainActor in
-        box.session?.handle(kind: kind, text: message)
+        box.session?.handle(kind: kind, text: message, source: box)
     }
 }
 

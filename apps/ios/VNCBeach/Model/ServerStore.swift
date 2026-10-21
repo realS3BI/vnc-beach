@@ -59,6 +59,7 @@ final class ServerStore {
 
     func remove(_ server: Server) {
         servers.removeAll { $0.id == server.id }
+        SSHKeyStore.removeUnused(server.access?.keyIDs ?? [], servers: servers)
         keychain.delete(account: server.id.uuidString)
         persist()
     }

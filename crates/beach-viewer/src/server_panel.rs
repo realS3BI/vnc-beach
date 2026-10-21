@@ -24,12 +24,35 @@ pub struct ServerPanel {
     /// "Dienst neu starten" was clicked.
     restart: bool,
     error: Option<String>,
+    #[cfg(target_os = "macos")]
+    mac_status: crate::mac_server::Status,
+    #[cfg(target_os = "macos")]
+    mac_polls: Receiver<crate::mac_server::Status>,
+    #[cfg(target_os = "macos")]
+    mac_setup: Option<Receiver<Result<(), String>>>,
+    #[cfg(target_os = "macos")]
+    mac_consent: bool,
+    #[cfg(target_os = "macos")]
+    mac_auto_login: bool,
+    #[cfg(target_os = "macos")]
+    mac_finished: bool,
 }
 
 impl ServerPanel {
     /// Starts the background process if none runs (it sets up autostart and
     /// the service on a fresh installation), then polls it every two seconds.
     pub fn new(ctx: egui::Context) -> Self {
+        #[cfg(target_os = "macos")]
+        let mac_polls = {
+            let (send, receive) = channel();
+            let context = ctx.clone();
+            std::thread::spawn(move || loop {
+                if send.send(crate::mac_server::status()).is_err() { break; }
+                context.request_repaint();
+                std::thread::sleep(Duration::from_secs(10));
+            });
+            receive
+        };
         let (tx, polls) = channel();
         std::thread::Builder::new()
             .name("server-status".into())
@@ -57,10 +80,41 @@ impl ServerPanel {
             show_password: false,
             restart: false,
             error: None,
+            #[cfg(target_os = "macos")]
+            mac_status: crate::mac_server::Status::default(),
+            #[cfg(target_os = "macos")]
+            mac_polls,
+            #[cfg(target_os = "macos")]
+            mac_setup: None,
+            #[cfg(target_os = "macos")]
+            mac_consent: false,
+            #[cfg(target_os = "macos")]
+            mac_auto_login: false,
+            #[cfg(target_os = "macos")]
+            mac_finished: false,
         }
     }
 
     fn poll(&mut self) {
+        #[cfg(target_os = "macos")]
+        {
+            while let Ok(status) = self.mac_polls.try_recv() {
+                if self.mac_status.message.is_empty() { self.mac_auto_login = status.automatic_login; }
+                self.mac_status = status;
+            }
+            if let Some(result) = self.mac_setup.as_ref().and_then(|receive| receive.try_recv().ok()) {
+                self.mac_setup = None;
+                match result {
+                    Ok(()) => {
+                        self.error = None;
+                        self.mac_finished = true;
+                        self.mac_consent = false;
+                        self.mac_status.message = "Eingerichtet. Status wird geprüft; ein Neustarttest steht noch aus.".into();
+                    }
+                    Err(error) => self.error = Some(error),
+                }
+            }
+        }
         while let Ok(status) = self.polls.try_recv() {
             self.status = status;
         }
@@ -122,23 +176,36 @@ impl ServerPanel {
         service::request_install(&exe).map_err(|e| e.to_string())
     }
 
-    /// macOS: Tailscale's apps only run after sign-in; offer the daemon.
+    /// Explicit opt-in: never silently disable FileVault on first launch.
     #[cfg(target_os = "macos")]
-    fn tailscale_row(ui: &mut egui::Ui, error: &mut Option<String>) {
+    fn mac_server_row(&mut self, ui: &mut egui::Ui) {
         ui.add_space(6.0);
-        if service::tailscale_daemon_installed() {
-            ui.weak("Tailscale läuft als Dienst und ist schon vor der Anmeldung verbunden.");
-            return;
-        }
-        ui.weak(
-            "Die Tailscale-App verbindet sich erst nach der Anmeldung. Für den Zugriff nach einem \
-             Neustart braucht es den Tailscale-Dienst; die Umstellung läuft im Terminal und nur \
-             direkt am Mac.",
-        );
-        if ui.small_button("Tailscale-Dienst einrichten …").clicked() {
-            if let Err(e) = service::tailscale_daemon_script() {
-                *error = Some(format!("Terminal lässt sich nicht öffnen: {e}"));
+        ui.strong("Servermodus nach Stromausfall");
+        ui.label(&self.mac_status.message);
+        ui.weak("Startet SSH, Tailscale und VNC Beach vor der Anmeldung. Unterstützt die eigenständige Tailscale-App und einen vorhandenen tailscaled-Dienst. Tailscale muss bereits angemeldet sein.");
+        ui.add_enabled_ui(self.mac_setup.is_none(), |ui| {
+            ui.checkbox(&mut self.mac_consent, "FileVault für diesen Mac deaktivieren");
+            ui.weak("Ohne FileVault schützt das Anmeldepasswort die Daten bei physischem Zugriff nicht mehr wie zuvor. Die Auswahl gilt dauerhaft für diesen Mac und bleibt bei VNC-Beach-Updates erhalten.");
+            ui.checkbox(&mut self.mac_auto_login, "Auch Benutzerdienste automatisch starten");
+            ui.weak("Meldet den Benutzer automatisch an und sperrt den Bildschirm nach 15 Sekunden. macOS speichert dafür das Anmeldepasswort. Ohne diese Option starten nur die Dienste vor der Anmeldung.");
+            let label = if self.mac_status.enabled { "Servermodus reparieren …" } else { "Servermodus einrichten …" };
+            if ui.add_enabled(self.mac_consent, egui::Button::new(label)).clicked() {
+                let (send, receive) = channel();
+                let automatic_login = self.mac_auto_login;
+                let context = ui.ctx().clone();
+                self.mac_setup = Some(receive);
+                self.error = None;
+                std::thread::spawn(move || {
+                    let _ = send.send(crate::mac_server::request_setup(automatic_login));
+                    context.request_repaint();
+                });
             }
+        });
+        if self.mac_setup.is_some() {
+            ui.horizontal(|ui| { ui.spinner(); ui.label("Servermodus wird eingerichtet. Passwortabfrage von VNC Beach beachten …"); });
+        }
+        if let Some(error) = &self.error {
+            ui.colored_label(Palette::of(ui).text, error);
         }
     }
 
@@ -331,6 +398,16 @@ impl ServerPanel {
 
     /// The settings window. Returns true if the config was changed and saved.
     pub fn window(&mut self, ctx: &egui::Context, config: &mut Config) -> bool {
+        #[cfg(target_os = "macos")]
+        if self.mac_finished {
+            self.mac_finished = false;
+            config.server = config::load().server;
+            if let Some(draft) = self.draft.as_mut() {
+                draft.enabled = true;
+                draft.autostart = true;
+                draft.service = true;
+            }
+        }
         let Some(mut draft) = self.draft.take() else {
             return false;
         };
@@ -344,6 +421,9 @@ impl ServerPanel {
             .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
                 ui.set_width(380.0);
+                egui::ScrollArea::vertical()
+                    .max_height((ctx.content_rect().height() - 150.0).max(200.0))
+                    .show(ui, |ui| {
                 ui.checkbox(&mut draft.enabled, "Bildschirm dieses Computers freigeben");
                 ui.add_enabled(
                     autostart::supported(),
@@ -369,7 +449,7 @@ impl ServerPanel {
                     }
                 }
                 #[cfg(target_os = "macos")]
-                Self::tailscale_row(ui, &mut self.error);
+                self.mac_server_row(ui);
                 ui.add_space(8.0);
                 egui::Grid::new("server-settings")
                     .num_columns(2)
@@ -430,14 +510,19 @@ impl ServerPanel {
                 );
                 if cfg!(target_os = "macos") {
                     ui.weak(
-                        "Läuft die Bildschirmfreigabe von macOS, ist Port 5900 belegt: hier z. B. 5901 \
-                         eintragen. Der Hintergrunddienst braucht Bildschirmaufnahme und Bedienungshilfen \
+                        "Port 5900 gehört meist der Bildschirmfreigabe von macOS, deshalb nimmt \
+                         VNC Beach 5901. Der Hintergrunddienst braucht Bildschirmaufnahme und Bedienungshilfen \
                          unter Datenschutz & Sicherheit.",
                     );
                 }
+                });
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    save = ui.button("Speichern").clicked();
+                    #[cfg(target_os = "macos")]
+                    let ready = self.mac_setup.is_none();
+                    #[cfg(not(target_os = "macos"))]
+                    let ready = true;
+                    save = ui.add_enabled(ready, egui::Button::new("Speichern")).clicked();
                     cancel = ui.button("Abbrechen").clicked();
                 });
             });

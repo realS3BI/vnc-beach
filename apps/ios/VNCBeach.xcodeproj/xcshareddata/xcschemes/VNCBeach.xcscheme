@@ -50,6 +50,17 @@
                ReferencedContainer = "container:VNCBeach.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "4ABD03F2CCCD56FAFF8E73A7"
+               BuildableName = "VNCBeachUITests.xctest"
+               BlueprintName = "VNCBeachUITests"
+               ReferencedContainer = "container:VNCBeach.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>

@@ -9,6 +9,12 @@ use crate::{proto, Error, PixelFormat, Result};
 pub const SECURITY_NONE: u8 = 1;
 pub const SECURITY_VNC: u8 = 2;
 
+/// Whether a complete server banner can be negotiated by this client. Useful
+/// when checking alternate routes before sending any authentication data.
+pub fn is_server_banner(banner: &[u8; 12]) -> bool {
+    Version::parse(banner).is_ok()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Version {
     V3_3,
@@ -231,6 +237,26 @@ fn read_reason(r: &mut impl Read) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recognizes_standard_and_apple_banners() {
+        for banner in [
+            b"RFB 003.003\n",
+            b"RFB 003.007\n",
+            b"RFB 003.008\n",
+            b"RFB 003.889\n",
+        ] {
+            assert!(is_server_banner(banner));
+        }
+        for banner in [
+            b"SSH-2.0-test",
+            b"HTTP/1.1 200",
+            b"RFB invalid\n",
+            b"RFB 003.008 ",
+        ] {
+            assert!(!is_server_banner(banner));
+        }
+    }
     use std::net::{TcpListener, TcpStream};
 
     fn init() -> ServerInit {

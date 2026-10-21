@@ -25,6 +25,7 @@ pub struct Server {
     /// Plain password in memory; obfuscated on disk.
     pub password: String,
     pub settings: Overrides,
+    pub access: crate::access::Access,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -41,6 +42,8 @@ struct Entry {
     password: String,
     #[serde(default, skip_serializing_if = "Overrides::is_empty")]
     settings: Overrides,
+    #[serde(default, skip_serializing_if = "crate::access::Access::is_empty")]
+    access: crate::access::Access,
 }
 
 impl From<&Server> for Entry {
@@ -50,6 +53,7 @@ impl From<&Server> for Entry {
             host: s.host.clone(),
             password: s.password.clone(),
             settings: s.settings,
+            access: s.access.clone(),
         }
     }
 }
@@ -61,6 +65,7 @@ impl From<Entry> for Server {
             host: e.host,
             password: e.password,
             settings: e.settings,
+            access: e.access,
         }
     }
 }
@@ -240,6 +245,7 @@ mod tests {
                 host: "192.168.1.20".into(),
                 password: "password".into(),
                 settings: Overrides::default(),
+                access: Default::default(),
             },
             Server {
                 name: "Ohne Passwort".into(),
@@ -250,6 +256,7 @@ mod tests {
                     view_only: Some(true),
                     ..Default::default()
                 },
+                access: Default::default(),
             },
         ]
     }
@@ -272,8 +279,47 @@ mod tests {
         assert_eq!(servers.len(), 1);
         assert_eq!(servers[0].password, "");
         assert!(servers[0].settings.is_empty());
+        assert!(servers[0].access.is_empty());
         assert_eq!(parse("").unwrap(), Vec::<Server>::new());
         assert!(parse("[[server]]\nname = \"a\"\n").is_err());
+    }
+
+    #[test]
+    fn preserves_optional_access_capabilities_without_storing_login_passwords() {
+        use crate::access::{Access, Authentication, Relay, Shell, Ssh, Wake};
+        let mut servers = sample();
+        servers[0].access = Access {
+            alternatives: vec!["192.168.1.20::5901".into()],
+            ssh: Some(Ssh {
+                address: "192.168.1.20".into(),
+                user: "remote".into(),
+                auth: Authentication::Password,
+            }),
+            wake: Some(Wake {
+                mac: "00:11:22:33:44:55".into(),
+                relays: vec![Relay {
+                    ssh: Ssh {
+                        address: "relay:22".into(),
+                        user: "operator".into(),
+                        auth: Authentication::Key {
+                            path: "/path/to/key".into(),
+                        },
+                    },
+                    shell: Shell::PowerShell,
+                }],
+                ..Default::default()
+            }),
+        };
+        let text = serialize(&servers);
+        assert_eq!(parse(&text).unwrap(), servers);
+        assert_eq!(
+            text.matches("password =").count(),
+            1,
+            "only the existing VNC password is serialized"
+        );
+        assert!(text.contains("power_shell"));
+        let legacy = serialize(&sample());
+        assert!(!legacy.contains("access"));
     }
 
     #[test]
@@ -291,6 +337,7 @@ mod tests {
                 host: "10.0.0.1".into(),
                 password: String::new(),
                 settings: Overrides::default(),
+                access: Default::default(),
             },
         );
         assert_eq!(
@@ -304,6 +351,7 @@ mod tests {
                 host: "x".into(),
                 password: String::new(),
                 settings: Overrides::default(),
+                access: Default::default(),
             },
         );
         assert_eq!((i, dir.servers[1].name.as_str()), (1, "Umbenannt"));
@@ -314,6 +362,7 @@ mod tests {
                 host: "y".into(),
                 password: String::new(),
                 settings: Overrides::default(),
+                access: Default::default(),
             },
         );
         assert_eq!((i, dir.servers.len()), (2, 3));

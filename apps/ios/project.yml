@@ -54,13 +54,14 @@ targets:
         # The Rust static library and its C header (crates/beach-mobile).
         SWIFT_INCLUDE_PATHS: "$(SRCROOT)/../../crates/beach-mobile/include"
         LIBRARY_SEARCH_PATHS: "$(SRCROOT)/../../target/$(BEACH_RUST_TARGET)/release"
-        OTHER_LDFLAGS: "-lbeach_mobile"
+        OTHER_LDFLAGS: "-lbeach_mobile -lz"
         "BEACH_RUST_TARGET[sdk=iphoneos*]": aarch64-apple-ios
         "BEACH_RUST_TARGET[sdk=iphonesimulator*]": aarch64-apple-ios-sim
         "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
     scheme:
       testTargets:
         - VNCBeachTests
+        - VNCBeachUITests
 
   VNCBeachTests:
     type: bundle.unit-test
@@ -79,5 +80,22 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: at.schlossers.vncbeach.tests
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/VNC Beach.app/VNC Beach"
         SWIFT_INCLUDE_PATHS: "$(SRCROOT)/../../crates/beach-mobile/include"
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+        "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
+
+  VNCBeachUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: VNCBeachUITests
+    dependencies:
+      - target: VNCBeach
+    configFiles:
+      Debug: Config/Base.xcconfig
+      Release: Config/Base.xcconfig
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: at.schlossers.vncbeach.uitests
         SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
         "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64

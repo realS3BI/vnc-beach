@@ -8,6 +8,12 @@ struct ServerEditView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var browser = ServiceBrowser()
     @State private var resolving: String?
+    @State private var importedKeys: Set<String> = []
+    @State private var validationError: String?
+
+    private var access: Binding<AccessSettings> {
+        Binding(get: { server.access ?? AccessSettings() }, set: { server.access = $0.isEmpty ? nil : $0 })
+    }
 
     private var canSave: Bool {
         !server.host.trimmingCharacters(in: .whitespaces).isEmpty
@@ -33,6 +39,13 @@ struct ServerEditView: View {
                     Toggle("Nur ansehen", isOn: $server.viewOnly)
                 } footer: {
                     Text("Zeigt den Bildschirm, ohne Maus und Tastatur zu senden.")
+                }
+                Section {
+                    NavigationLink("Erreichbarkeit & Start") {
+                        AccessSettingsView(settings: access, importedKeys: $importedKeys)
+                    }
+                } footer: {
+                    Text("Alternative Adressen, SSH-Anmeldung und Aufwecken über ein Zugangsgerät.")
                 }
                 if !browser.services.isEmpty {
                     Section("In der Nähe") {
@@ -60,8 +73,14 @@ struct ServerEditView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Sichern") {
+                        if let error = server.access?.validate() {
+                            validationError = error
+                            return
+                        }
                         server.host = server.host.trimmingCharacters(in: .whitespaces)
+                        let previousKeys = store.server(id: server.id)?.access?.keyIDs ?? []
                         store.save(server, password: password)
+                        SSHKeyStore.removeUnused(previousKeys, servers: store.servers)
                         dismiss()
                     }
                     .disabled(!canSave)
@@ -69,7 +88,12 @@ struct ServerEditView: View {
             }
             .onAppear { browser.start() }
             .onDisappear { browser.stop() }
+            .alert("Einstellungen prüfen", isPresented: Binding(
+                get: { validationError != nil }, set: { if !$0 { validationError = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: { Text(validationError ?? "") }
         }
+        .onDisappear { SSHKeyStore.removeUnused(importedKeys, servers: store.servers) }
     }
 
     private func use(_ service: DiscoveredService) {

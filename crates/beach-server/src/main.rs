@@ -10,8 +10,9 @@ struct Args {
     /// Address to listen on.
     #[arg(long, default_value = "0.0.0.0")]
     bind: String,
-    /// TCP port. 5900 is the VNC default.
-    #[arg(short, long, default_value_t = 5900)]
+    /// TCP port. 5901 (display 1), since macOS Screen Sharing usually holds
+    /// the VNC default 5900.
+    #[arg(short, long, default_value_t = 5901)]
     port: u16,
     /// VNC password (only the first 8 characters count). Also read from
     /// VNC_BEACH_PASSWORD. Without one, a random password is generated.

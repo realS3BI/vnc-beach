@@ -46,10 +46,10 @@ cargo build --release
 ### Server
 
 ```sh
-./target/release/beach-server                     # Port 5900, erzeugt ein Zufallspasswort und gibt es aus
+./target/release/beach-server                     # Port 5901, erzeugt ein Zufallspasswort und gibt es aus
 ./target/release/beach-server --password geheim   # eigenes Passwort (max. 8 Zeichen, VNC-Limit)
 ./target/release/beach-server --list-displays     # Bildschirme auflisten
-./target/release/beach-server --display 1 --port 5901 --fps 30   # nur Bildschirm 1; Standard: alle („all“), auch „primary“; 60 Bilder pro Sekunde
+./target/release/beach-server --display 1 --port 5902 --fps 30   # nur Bildschirm 1; Standard: alle („all“), auch „primary“; 60 Bilder pro Sekunde
 ./target/release/beach-server --view-only         # nur zuschauen, keine Eingaben
 ```
 
@@ -67,9 +67,80 @@ Das Passwort lässt sich auch über `VNC_BEACH_PASSWORD` setzen.
 ./target/release/beach-viewer --background          # Windows: nur Infobereich-Symbol und Server
 ```
 
-Adressen im Formular: `mac.local` (Port 5900), `192.168.1.20:1` (Display 1 = Port 5901), `192.168.1.20::5999` (Port explizit).
+Adressen im Formular: `mac.local` (Port 5900), `192.168.1.20:1` (Display 1 = Port 5901), `192.168.1.20::5999` (Port explizit). Der VNC-Beach-Server lauscht standardmäßig auf 5901, also `rechner:1` eingeben.
 
 **Favoriten:** Links im Verbindungsdialog steht die Favoritenliste. Name, Adresse und Passwort rechts eingeben und „Als Favorit speichern" klicken; ein Klick auf einen Favoriten lädt ihn zum Bearbeiten ins Formular („Speichern", „Favorit löschen"), ein Doppelklick oder der Pfeil rechts in der Karte verbindet. Ab sechs Favoriten gibt es ein Suchfeld über der Liste. „Neu" leert das Formular für einen weiteren Favoriten.
+
+#### Geräte über alternative Wege erreichen und vorbereiten
+
+Im Desktop-Viewer und in der iOS-App ergänzt **Erreichbarkeit & Start** einen Favoriten um optionale
+Fähigkeiten. Zielgeräte können Macs, Windows-PCs, Linux-Rechner, Raspberry Pis
+oder Server sein. Voraussetzung für die Bildschirmverbindung ist jeweils ein
+erreichbarer Standard-VNC-Server.
+
+1. Unter **Alternative Adressen** zusätzliche VNC-Adressen eintragen, etwa die
+   LAN-Adresse neben dem Tailscale-Namen. **Verbinden** prüft die Adressen der
+   Reihe nach und verwendet den ersten antwortenden VNC-Server. Eine abgelehnte
+   VNC-Anmeldung wird angezeigt und nicht an der nächsten Adresse wiederholt.
+2. Bei Bedarf **SSH-Anmeldung anbieten** aktivieren und SSH-Adresse sowie
+   Benutzername ergänzen. **Per SSH anmelden** fragt das SSH-Passwort ab oder
+   verwendet den ausgewählten privaten SSH-Schlüssel. Danach wartet VNC Beach
+   bis zu 90 Sekunden auf den VNC-Server und verbindet sich. Auf unterstützten
+   Macs mit Apple-Chip ab macOS 26 kann die Passwort-Anmeldung FileVault
+   entsperren. Dafür müssen „Entfernte Anmeldung“ und das Netzwerk bereits vor
+   dem Entsperren verfügbar sein. Ein SSH-Abbruch allein gilt nicht als
+   bestätigte Entsperrung. Der echte FileVault-Neustart wurde bisher nicht getestet.
+3. Bei Bedarf **Wake-on-LAN anbieten** aktivieren, die MAC-Adresse der
+   Netzwerkkarte und die lokale Broadcast-Adresse mit Port eintragen, etwa
+   `192.168.50.255:9`. **Aufwecken** sendet ein Magic Packet und wartet danach
+   auf VNC. Hardware und Betriebssystem des Zielgeräts müssen Wake-on-LAN
+   unterstützen und dafür eingerichtet sein.
+
+Für Wake-on-LAN von unterwegs ein **SSH-Zugangsgerät** im Netz des Zielgeräts
+hinzufügen. Das kann ein Pi, NAS, Mac oder Windows-Rechner sein. Eine POSIX-Shell
+benötigt Python 3 oder Perl; unter Windows wird PowerShell verwendet. Bei
+mehreren Zugangsgeräten versucht VNC Beach sie der Reihe nach, bis eines das
+Signal gesendet hat. Ohne Zugangsgerät wird aus dem aktuellen Netz des Viewers
+gesendet. Ein gesendetes Signal bestätigt noch nicht, dass der Rechner startet.
+
+Die Netzwerkwege werden separat eingerichtet. Beispielsweise können Pi und NAS
+als [Tailscale-Subnet-Router](https://tailscale.com/docs/features/subnet-routers)
+dieselbe lokale Mac-Adresse freigeben; Tailscale übernimmt dann die Umschaltung.
+VNC Beach installiert keine Routersoftware und ändert keine Netzfreigaben.
+Nach einem Aufwecksignal kann bei FileVault zusätzlich eine SSH-Anmeldung nötig
+sein. Den laufenden Versuch dann abbrechen und **Per SSH anmelden** wählen.
+
+Beim ersten SSH-Zugriff zeigt VNC Beach den SHA-256-Fingerabdruck des Geräts.
+Den Fingerabdruck über einen bekannten Zugang prüfen und ausdrücklich bestätigen.
+Die bestätigten Geräteschlüssel liegen am Desktop unter `ssh_hosts` neben
+`servers.toml`, unter iOS in Application Support innerhalb des App-Containers.
+Ändert sich ein Schlüssel, stoppt die Anmeldung vor der Passwortübertragung.
+SSH-Passwörter und Schlüssel-Passphrasen werden nur für den jeweiligen Versuch
+verwendet und nicht gespeichert. Das SSH-Passwort ist unabhängig vom
+VNC-Passwort. Bestehende Favoriten bleiben unverändert nutzbar.
+
+Auf iPhone und iPad unter **Computer bearbeiten → Erreichbarkeit & Start** die
+Angaben ergänzen. Bei nicht erreichbarem VNC erscheinen **Per SSH anmelden** und
+**Aufwecken & verbinden**, sofern sie eingerichtet sind. Nach dem Aufwecken lässt
+sich direkt zur SSH-Anmeldung wechseln. Jeder Versuch kann abgebrochen werden.
+Private SSH-Schlüssel werden über die Dateien-App importiert und im
+Geräteschlüsselbund gespeichert. Nur für den laufenden Versuch entsteht eine
+geschützte temporäre Schlüsseldatei.
+
+Unter iOS benötigt Wake-on-LAN mindestens ein SSH-Zugangsgerät, auch im eigenen
+WLAN. Das Aufwecksignal sendet dann Pi, NAS oder ein anderer Rechner vor Ort.
+Direkter UDP-Broadcast auf einem iPhone oder iPad benötigt eine zusätzliche
+[Apple-Berechtigung](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.networking.multicast),
+die diese App nicht voraussetzt.
+
+Für die Entwicklung prüft `python3 tools/test-access-ssh.py` Schlüsselanmeldung,
+Geräteschlüsselprüfung und Wake-on-LAN über einen temporären OpenSSH-Server auf
+Loopback. `cargo run -p beach-viewer --example access-preview -- /tmp/access.png`
+erstellt eine Vorschau des Einstellungsbereichs ohne Hintergrunddienst.
+`tools/test-access-auth.py` prüft zusätzlich Passwort-Anmeldung, mehrstufige
+SSH-Abfragen und Verbindungsabbrüche mit Testservern; dafür wird eine separate
+Python-Umgebung mit Paramiko benötigt. Mit `--ios` prüft es zusätzlich den
+Swift/Rust-Verbindungsablauf im iPad-Simulator.
 
 Die Liste liegt als `servers.toml` unter `~/Library/Application Support/vnc-beach/` (macOS) bzw. `%APPDATA%\vnc-beach\` (Windows) und lässt sich auch von Hand bearbeiten. Passwörter stehen darin im Format von `vncpasswd` (DES mit festem Schlüssel, wie in `~/.vnc/passwd`). Das verhindert nur das Mitlesen auf einen Blick, ist aber keine Verschlüsselung: Wer die Datei hat, kann die Passwörter zurückrechnen.
 
@@ -103,7 +174,7 @@ Die Dateiübertragung verwendet eine ausgehandelte VNC-Beach-Erweiterung. Andere
 
 ### Server im Viewer
 
-Der Server steckt im Viewer, auf Windows und auf dem Mac. `vnc-beach.exe --background` startet ohne Fenster: ein Symbol im Infobereich, dahinter der Server. Das Menü des Symbols zeigt den Stand („Server online, Port 5900, 1 Zuschauer"), öffnet den Viewer, hält den Server an oder startet ihn, schaltet „Beim Anmelden starten" und beendet den Dienst. Das Menü erscheint bei Links- wie Rechtsklick; „VNC Beach öffnen“ holt einen laufenden Viewer nach vorn, statt einen zweiten zu starten.
+Der Server steckt im Viewer, auf Windows und auf dem Mac. `vnc-beach.exe --background` startet ohne Fenster: ein Symbol im Infobereich, dahinter der Server. Das Menü des Symbols zeigt den Stand („Server online, Port 5901, 1 Zuschauer"), öffnet den Viewer, hält den Server an oder startet ihn, schaltet „Beim Anmelden starten" und beendet den Dienst. Das Menü erscheint bei Links- wie Rechtsklick; „VNC Beach öffnen“ holt einen laufenden Viewer nach vorn, statt einen zweiten zu starten.
 
 Im Viewer zeigt links unten „Dieser Computer" denselben Stand samt Passwort. „Einstellungen …" setzt Passwort (beim ersten Start wird eines erzeugt), Port, Bildschirme (alle, nur der Hauptbildschirm oder ein bestimmter; `display = "all" | "primary" | 1` in `config.toml`), Bilder pro Sekunde, „Nur ansehen", ob der Server überhaupt läuft und ob der Hintergrunddienst beim Anmelden startet (Windows: Registry-Eintrag `HKCU\…\Run\VNC Beach`, macOS: LaunchAgent). Läuft kein Hintergrunddienst, bietet der Viewer an, ihn zu starten.
 
@@ -115,14 +186,25 @@ VNC Beach richtet das beim ersten Start selbst ein: Der Viewer startet den Hinte
 
 **Windows:** VNC Beach richtet einen Windows-Dienst ein. Er kopiert das Programm nach `C:\Program Files\VNC Beach`, startet mit Windows und hält den Server als SYSTEM-Prozess in der Konsolensitzung am Laufen. Zuschauer sehen dann auch den Sperr- und Anmeldebildschirm sowie UAC-Abfragen und können dort PIN oder Passwort eingeben. Dabei stellt VNC Beach Tailscale auf „unbeaufsichtigt“ (`tailscale set --unattended`), damit es schon vor der Anmeldung verbunden ist. Das Symbol im Infobereich startet keinen eigenen Server mehr, sondern zeigt und steuert den des Dienstes („Windows-Dienst online …“). Passwort, Port und die anderen Einstellungen kommen weiter aus der `config.toml` des Benutzers, der den Dienst eingerichtet hat; Dateiübertragungen landen in dessen Profil. Nach einem Update erkennt der Hintergrunddienst die ältere Kopie in `Program Files` und fragt erneut nach Administratorrechten. Protokolle: `C:\ProgramData\VNC Beach\` (`service.log`, `agent.log`, `setup.log`).
 
-**Mac:** VNC Beach legt einen LaunchAgent für das Anmeldefenster an (`/Library/LaunchAgents/at.schlossers.vnc-beach.loginwindow.plist`, macOS fragt nach einem Administratorpasswort). Er startet den Server, solange niemand angemeldet ist; nach der Anmeldung übernimmt der Server des Menüleisten-Symbols. Ein Update ersetzt die App an derselben Stelle, der LaunchAgent bleibt gültig. Protokolle: `/Library/Logs/VNC Beach/`. Die Tailscale-App verbindet sich auf dem Mac erst nach der Anmeldung; „Tailscale-Dienst einrichten …“ in den Server-Einstellungen öffnet ein Skript im Terminal, das auf den Tailscale-Dienst `tailscaled` umstellt (braucht Homebrew, das Mac-Passwort und eine Anmeldung im Browser, deshalb nur direkt am Mac ausführen). Mit FileVault startet nach dem Einschalten nichts, bis jemand das Passwort eingibt; ab macOS 26 geht das auf Apple-Silicon-Macs per SSH aus dem lokalen Netz („Entfernte Anmeldung“ an, das Skript schaltet sie ein). Anmeldefenster, Sperrbildschirm und der Tailscale-Wechsel sind auf dem Mac noch nicht ausprobiert.
+**Mac:** VNC Beach legt einen LaunchAgent f�r das Anmeldefenster an (`/Library/LaunchAgents/at.schlossers.vnc-beach.loginwindow.plist`, macOS fragt nach einem Administratorpasswort). Er startet den Server, solange niemand angemeldet ist; nach der Anmeldung �bernimmt der Server des Men�leisten-Symbols. Ein Update ersetzt die App an derselben Stelle, der LaunchAgent bleibt g�ltig. Protokolle: `/Library/Logs/VNC Beach/`.
+
+**Servermodus nach Stromausfall:** In den Server-Einstellungen l�sst sich der Mac ausdr�cklich f�r unbeaufsichtigten Betrieb einrichten. Die normale Installation und ein gew�hnliches Update schalten FileVault nicht ungefragt ab. Erst �FileVault f�r diesen Mac deaktivieren� und �Servermodus einrichten �� starten diese Einrichtung mit dem lokalen Mac-Passwort. Der Servermodus:
+
+- deaktiviert FileVault, aktiviert SSH und den automatischen Wiederanlauf nach Stromausfall und verhindert den Ruhezustand des Macs;
+- richtet VNC Beach am Anmeldefenster sowie beim Anmelden ein;
+- startet die bestehende eigenst�ndige Tailscale-App �ber einen Benutzer-Dienst in `/Library/LaunchDaemons`, ohne eine Desktop-Anmeldung zu ben�tigen, und versucht die Verbindung bei Ausf�llen alle 60 Sekunden erneut. Ein bereits eingerichteter `tailscaled`-Dienst wird ebenfalls unterst�tzt. Ger�teeintrag, Adresse, Routen und sonstige Einstellungen bleiben erhalten. Tailscale muss vorher angemeldet und seine Netzwerkerweiterung genehmigt sein; die App-Store-Variante wird vor der Anmeldung nicht unterst�tzt;
+- kann zus�tzlich die automatische Anmeldung aktivieren, damit die vorhandenen Benutzer-Dienste starten. Dabei speichert macOS das Anmeldepasswort f�r die automatische Anmeldung. Der Bildschirm wird nach 15 Sekunden ausgeschaltet und verlangt beim Entsperren sofort das Passwort. Diese Sperre ersetzt den Schutz durch FileVault nicht.
+
+Die gew�hlte Einrichtung wird rootgesch�tzt in `/Library/Application Support/VNC Beach/server-mode.json` gespeichert. Dort stehen nur Pfade und Optionen, kein Passwort. Das Mac-Passwort wird bei der Einrichtung �ber stdin und ein privates Terminal an die Systemprogramme �bergeben, nicht �ber Kommandozeilenargumente oder VNC-Beach-Konfigurationen. Die urspr�nglichen Einstellungen liegen im nur f�r root lesbaren Unterordner `before-server-mode`. Ein VNC-Beach-Update beh�lt die Auswahl und aktualisiert n�tigenfalls die verwalteten Startdateien nach der Administratorabfrage. Ist FileVault sp�ter wieder aktiv, zeigt VNC Beach den Reparaturbedarf an; es speichert kein Administratorpasswort, mit dem es eine erneute Verschl�sselung heimlich r�ckg�ngig machen k�nnte.
+
+Die Einrichtung startet den Mac nicht neu. Ein kontrollierter Neustarttest muss best�tigen, dass Tailscale, SSH und VNC Beach am Anmeldefenster sowie die gew�nschten Benutzer-Dienste erreichbar sind. Wenn macOS noch vor dem Start auf das FileVault-Passwort wartet, kann auch dieser Dienst nicht laufen. Ein davon unabh�ngiger Heimnetz-VPN-Zugang bleibt deshalb ein sinnvoller Wiederherstellungsweg. Die Passwortabfrage sch�tzt nicht vor physischem Datenzugriff, wenn FileVault ausgeschaltet ist.
 
 Für „Rechner einschalten und aus der Ferne drauf“ braucht es zusätzlich:
 
 - **Tailscale-Schlüssel:** im Tailscale-Admin-Panel für das Gerät „Disable key expiry“ wählen, sonst muss man sich alle paar Monate neu anmelden.
 - **Einschalten (PC):** im BIOS/UEFI „Restore AC Power Loss“ auf „Power On“ (startet, sobald Strom da ist) und für Wake-on-LAN „Power On By PCI-E“ an, „ErP Ready“ aus. Unter Windows den Schnellstart abschalten (`HiberbootEnabled = 0`), dann weckt das Magic Packet auch aus dem ausgeschalteten Zustand. Das Magic Packet muss aus dem lokalen Netz kommen, z. B. von der FRITZ!Box („Computer starten“, auch über MyFRITZ!) oder einem anderen Gerät im Heimnetz.
 
-Auf dem Mac läuft `--background` als Symbol in der Menüleiste, der Autostart ist ein LaunchAgent (`~/Library/LaunchAgents/at.schlossers.vnc-beach.plist`). Der Hintergrunddienst braucht Bildschirmaufnahme und Bedienungshilfen unter *Datenschutz & Sicherheit*, macOS fragt beim ersten Start. Fehlt eine Freigabe, läuft der Server trotzdem: ohne Bedienungshilfen können Zuschauer nur zusehen, ohne Bildschirmaufnahme sehen sie nur den Schreibtischhintergrund. „Dieser Computer“ zeigt das an und öffnet mit einem Knopf die passende Einstellung. Bedienungshilfen wirken sofort, für die Bildschirmaufnahme gibt es „Dienst neu starten“. Ist die Bildschirmfreigabe von macOS aktiv, belegt sie Port 5900; dann in den Server-Einstellungen z. B. 5901 eintragen oder die Bildschirmfreigabe abschalten. Wer nur die Bildschirmfreigabe nutzen will, lässt „Bildschirm dieses Computers freigeben" einfach aus.
+Auf dem Mac läuft `--background` als Symbol in der Menüleiste, der Autostart ist ein LaunchAgent (`~/Library/LaunchAgents/at.schlossers.vnc-beach.plist`). Der Hintergrunddienst braucht Bildschirmaufnahme und Bedienungshilfen unter *Datenschutz & Sicherheit*, macOS fragt beim ersten Start. Fehlt eine Freigabe, läuft der Server trotzdem: ohne Bedienungshilfen können Zuschauer nur zusehen, ohne Bildschirmaufnahme sehen sie nur den Schreibtischhintergrund. „Dieser Computer“ zeigt das an und öffnet mit einem Knopf die passende Einstellung. Bedienungshilfen wirken sofort, für die Bildschirmaufnahme gibt es „Dienst neu starten“. Port 5900 gehört der Bildschirmfreigabe von macOS, deshalb lauscht VNC Beach standardmäßig auf 5901 (Display 1). Installationen, die schon eine `config.toml` haben, behalten ihren Port. Wer nur die Bildschirmfreigabe nutzen will, lässt „Bildschirm dieses Computers freigeben" einfach aus.
 
 Die Strg+Alt+Entf-Taste in der Leiste schickt die Kombination an den Server. Auf dem Mac wird Cmd als Super/Meta gesendet und kommt auf einem Mac-Server wieder als Cmd an.
 

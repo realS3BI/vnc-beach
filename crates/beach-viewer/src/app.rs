@@ -11,7 +11,9 @@ use egui::{
 use rfb::keysym;
 use rfb::messages::ClientMessage;
 
-use crate::client::{parse_address, Connection, Notice, Region, RemoteKind, Screen};
+use crate::access::Action;
+use crate::access_ui::{self, Connecting};
+use crate::client::{Connection, Notice, Region, RemoteKind, Screen};
 use crate::clipboard::Clipboard;
 use crate::config::{self, Config};
 use crate::icon;
@@ -45,6 +47,7 @@ pub struct App {
     settings_open: bool,
     /// Search text over the favorites (only shown for longer lists).
     filter: String,
+    requested_action: Option<Action>,
 }
 
 /// Where the update check stands.
@@ -86,7 +89,7 @@ impl Update {
 
 enum State {
     Idle,
-    Connecting(Receiver<rfb::Result<Connection>>, Settings),
+    Connecting(Box<Connecting>, Settings),
     Connected(Box<Remote>),
 }
 
@@ -108,6 +111,7 @@ impl App {
             show_password: false,
             settings_open: false,
             filter: String::new(),
+            requested_action: None,
             update: Update::check(&cc.egui_ctx, false),
             directory,
             config: config::load(),
@@ -144,6 +148,14 @@ impl App {
         let mut server = self.form.clone();
         server.name = server.name.trim().to_string();
         server.host = server.host.trim().to_string();
+        server
+            .access
+            .alternatives
+            .retain(|address| !address.trim().is_empty());
+        if let Err(error) = server.access.validate() {
+            self.error = Some(format!("Erreichbarkeit & Start: {error:#}"));
+            return;
+        }
         if server.name.is_empty() {
             server.name = server.host.clone();
         }
@@ -173,23 +185,13 @@ impl App {
         self.form.settings.apply(self.config.viewer)
     }
 
-    fn connect(&mut self, ctx: &egui::Context) {
-        let addr = parse_address(&self.form.host);
-        let password = (!self.form.password.is_empty()).then(|| self.form.password.clone());
+    fn connect(&mut self, ctx: &egui::Context, action: Action) {
         let settings = self.settings();
         let pf = settings.colors.pixel_format();
-        let (tx, rx) = channel();
         let ctx = ctx.clone();
-        std::thread::spawn(move || {
-            let repaint_ctx = ctx.clone();
-            let result = Connection::open(&addr, password.as_deref(), pf, move || {
-                repaint_ctx.request_repaint()
-            });
-            let _ = tx.send(result);
-            ctx.request_repaint();
-        });
+        let task = crate::access::start(self.form.clone(), action, pf, move || ctx.request_repaint());
         self.error = None;
-        self.state = State::Connecting(rx, settings);
+        self.state = State::Connecting(Box::new(Connecting::new(task)), settings);
     }
 
     fn can_connect(&self) -> bool {
@@ -237,7 +239,9 @@ impl App {
                         ui.add_space(8.0);
                         self.version_row(ui, &ctx);
                     });
-                connect |= self.favorites_panel(ui);
+                ui.add_enabled_ui(!matches!(self.state, State::Connecting(..)), |ui| {
+                    connect |= self.favorites_panel(ui);
+                });
             });
         let width = 460.0;
         egui::CentralPanel::default()
@@ -270,7 +274,11 @@ impl App {
                 });
             });
         if connect && self.can_connect() {
-            self.connect(&ctx);
+            self.connect(&ctx, Action::Connect);
+        } else if let Some(action) = self.requested_action.take() {
+            if self.can_connect() {
+                self.connect(&ctx, action);
+            }
         }
     }
 
@@ -513,6 +521,7 @@ impl App {
         let mut connect = false;
         let mut fields = None;
         theme::card(ui).show(ui, |ui| {
+            ui.add_enabled_ui(!connecting, |ui| {
             ui.set_width(inner);
             theme::field_label(ui, "Name");
             let name = ui.add(
@@ -553,6 +562,7 @@ impl App {
                 .inner;
             ui.add_space(12.0);
             self.settings_section(ui, inner);
+            access_ui::configuration(ui, &mut self.form.access);
             ui.add_space(14.0);
 
             let enter = (name.lost_focus() || host.lost_focus() || pw.lost_focus())
@@ -581,6 +591,20 @@ impl App {
                     self.save_form();
                 }
             });
+            if self.form.access.ssh.is_some() || self.form.access.wake.is_some() {
+                ui.horizontal_wrapped(|ui| {
+                    if self.form.access.ssh.is_some()
+                        && theme::Button::new("Per SSH anmelden", Kind::Secondary).enabled(has_host).show(ui)
+                            .on_hover_text("SSH-Anmeldung starten und anschließend bis zu 90 Sekunden auf VNC warten. Kann FileVault auf unterstützten Macs entsperren.").clicked() {
+                        self.requested_action = Some(Action::SignIn);
+                    }
+                    if self.form.access.wake.is_some()
+                        && theme::Button::new("Aufwecken", Kind::Secondary).enabled(has_host).show(ui)
+                            .on_hover_text("Ein Wake-on-LAN-Signal senden und anschließend bis zu 90 Sekunden auf VNC warten.").clicked() {
+                        self.requested_action = Some(Action::Wake);
+                    }
+                });
+            }
             if let Some(index) = self.editing {
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
@@ -611,9 +635,15 @@ impl App {
                 });
             }
             fields = Some((name, host, pw));
+            });
         });
         if let Some((name, host, pw)) = fields {
-            if self.form.host.is_empty() && !name.has_focus() && !host.has_focus() && !pw.has_focus() {
+            if !connecting
+                && self.form.host.is_empty()
+                && !name.has_focus()
+                && !host.has_focus()
+                && !pw.has_focus()
+            {
                 host.request_focus();
             }
         }
@@ -625,10 +655,10 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = &ui.ctx().clone();
         self.poll_update(ctx);
-        if let State::Connecting(rx, settings) = &self.state {
+        if let State::Connecting(task, settings) = &mut self.state {
             let settings = *settings;
-            match rx.try_recv() {
-                Ok(Ok(conn)) => {
+            match task.poll() {
+                Some(Ok(conn)) => {
                     let label = self.label(&conn);
                     ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!("{label} – VNC Beach")));
                     let remote = Remote::new(conn, label, settings, ctx);
@@ -639,16 +669,11 @@ impl eframe::App for App {
                     }
                     self.state = State::Connected(Box::new(remote));
                 }
-                Ok(Err(e)) => {
-                    self.error = Some(match e {
-                        rfb::Error::PasswordRequired => "Der Server verlangt ein Passwort.".into(),
-                        rfb::Error::AuthFailed(reason) => format!("Anmeldung fehlgeschlagen: {reason}"),
-                        e => format!("Verbindung fehlgeschlagen: {e}"),
-                    });
+                Some(Err(e)) => {
+                    self.error = Some(e);
                     self.state = State::Idle;
                 }
-                Err(TryRecvError::Empty) => {}
-                Err(TryRecvError::Disconnected) => self.state = State::Idle,
+                None => {}
             }
         }
 
@@ -667,6 +692,16 @@ impl eframe::App for App {
             }
         }
         self.connect_form(ui);
+        if let State::Connecting(task, _) = &mut self.state {
+            let modal = egui::Modal::new(egui::Id::new("connection-preparation")).show(ctx, |ui| {
+                ui.set_width(420.0_f32.min(ctx.content_rect().width() - 48.0));
+                task.show(ui)
+            });
+            if modal.inner || modal.should_close() {
+                self.state = State::Idle;
+                self.error = None;
+            }
+        }
         self.defaults_window(ctx);
         if let Some(panel) = &mut self.server {
             panel.window(ctx, &mut self.config);

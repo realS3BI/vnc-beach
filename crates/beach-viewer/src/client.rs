@@ -1,7 +1,7 @@
 //! Network side of the viewer: handshake, framebuffer decoding, sending input.
 
 use std::io::{BufReader, BufWriter, Write};
-use std::net::{Shutdown, TcpStream, ToSocketAddrs};
+use std::net::{Shutdown, TcpStream};
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -77,14 +77,13 @@ pub struct Connection {
 }
 
 impl Connection {
-    /// Connects, authenticates and asks the server for `pf` pixels.
-    pub fn open(
-        addr: &str,
+    /// Continues on a socket already checked by the connection workflow.
+    pub fn from_stream(
+        mut stream: TcpStream,
         password: Option<&str>,
         pf: PixelFormat,
         repaint: impl Fn() + Send + 'static,
     ) -> rfb::Result<Connection> {
-        let mut stream = connect(addr)?;
         stream.set_nodelay(true)?;
         stream.set_write_timeout(Some(Duration::from_secs(15)))?;
         stream.set_read_timeout(Some(Duration::from_secs(15)))?;
@@ -183,49 +182,6 @@ fn detect(banner: &str, name: &str) -> RemoteKind {
     } else {
         RemoteKind::Other
     }
-}
-
-/// Accepts `host`, `host:display` (display < 100 → port 5900+display),
-/// `host:port`, `host::port` and `[ipv6]:port`.
-pub fn parse_address(input: &str) -> String {
-    let input = input.trim();
-    if let Some((host, port)) = input.rsplit_once("::") {
-        if !host.is_empty() && port.parse::<u16>().is_ok() {
-            return format!("{host}:{port}");
-        }
-    }
-    let (host, n) = match input.rsplit_once(':') {
-        Some((h, p)) if !h.ends_with(':') && (h.starts_with('[') || !h.contains(':')) => {
-            match p.parse::<u16>() {
-                Ok(n) => (h, Some(n)),
-                Err(_) => (input, None),
-            }
-        }
-        _ => (input, None),
-    };
-    let port = match n {
-        Some(n) if n < 100 => 5900 + n,
-        Some(n) => n,
-        None => 5900,
-    };
-    if host.contains(':') && !host.starts_with('[') {
-        format!("[{host}]:{port}")
-    } else {
-        format!("{host}:{port}")
-    }
-}
-
-fn connect(addr: &str) -> rfb::Result<TcpStream> {
-    let mut last = None;
-    for a in addr.to_socket_addrs()? {
-        match TcpStream::connect_timeout(&a, Duration::from_secs(10)) {
-            Ok(s) => return Ok(s),
-            Err(e) => last = Some(e),
-        }
-    }
-    Err(last
-        .map(Error::Io)
-        .unwrap_or_else(|| Error::Protocol(format!("could not resolve {addr}"))))
 }
 
 /// Reader and UI share one writer so their messages never interleave.
@@ -406,7 +362,7 @@ impl FileChannel {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_address;
+    use beach_access::parse_address;
 
     #[test]
     fn detects_macs() {
@@ -435,5 +391,6 @@ mod tests {
         assert_eq!(parse_address("10.0.0.2::5"), "10.0.0.2:5");
         assert_eq!(parse_address("[::1]:5901"), "[::1]:5901");
         assert_eq!(parse_address("::1"), "[::1]:5900");
+        assert_eq!(parse_address("fd00::9"), "[fd00::9]:5900");
     }
 }

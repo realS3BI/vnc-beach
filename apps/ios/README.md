@@ -17,7 +17,7 @@ Tailscale-VPN: der Windows-PC ist dann einfach unter seinem Gerätenamen
 | `VNCBeach/Core` | `RemoteSession` (Swift-Hülle um die C-API), Keysym-Tabelle, Bonjour-Suche |
 | `VNCBeach/Screen` | `RemoteScreenView` (UIKit: Gesten, Trackpad, Pencil, Tastatur), Metal-Renderer, Zusatztastenleiste |
 | `VNCBeach/UI` | SwiftUI: Liste, Bearbeiten, Einstellungen, Sitzung mit Werkzeugleiste |
-| `VNCBeachTests` | Unit-Tests (Keysyms, Favoriten, URL-Schema) |
+| `VNCBeachTests` | Tests für Keysyms, Favoriten, Erreichbarkeit und abbrechbare RFB-Verbindungen |
 | `ci_scripts/ci_post_clone.sh` | Xcode Cloud: XcodeGen, Rust-Toolchain, Team und Buildnummer |
 | `../../tools/build-ios.sh` | Baut `libbeach_mobile.a`; läuft als Build-Phase vor dem Swift-Build |
 
@@ -47,6 +47,15 @@ xcodebuild -project VNCBeach.xcodeproj -scheme VNCBeach \
 
 Tests: dasselbe mit `test` statt `build`. Die Metal-Shader werden zur
 Laufzeit kompiliert; die Metal-Toolchain von Xcode ist nicht nötig.
+
+`AccessTests` prüft alternative Adressen mit einem lokalen RFB-Testserver,
+Schlüsseldateien und den Wechsel von einem abgebrochenen Versuch zur nächsten
+Verbindung. `VNCBeachUITests` prüft das Bearbeitungsformular und die Aktionen
+nach einer fehlgeschlagenen Verbindung. Mit Paramiko in einer separaten
+Python-Umgebung prüft `python tools/test-access-auth.py --ios` vom Repository-Root
+zusätzlich SSH-Gerätebestätigung und mehrstufige Anmeldung bis zur
+VNC-Verbindung im iPad-Simulator. Die Testserver nutzen ausschließlich Loopback
+und temporäre Zugangsdaten.
 
 Zum Entwickeln im Simulator verbindet ein Startargument direkt:
 
@@ -88,9 +97,10 @@ Workflow liegen (Scheme `VNCBeachCloud`, Variable
 `VNC_BEACH_DEVELOPMENT_TEAM`), wird derzeit aber nicht verwendet, weil die
 Ersteinrichtung von Xcode Cloud die Xcode-Oberfläche braucht.
 
-`ITSAppUsesNonExemptEncryption` steht auf `false`: Die App nutzt nur die
-VNC-Passwort-Authentifizierung (DES-Challenge, Standardverfahren von RFC
-6143) und TLS aus dem System; der Transport läuft über das VPN.
+Die App nutzt die VNC-Passwort-Authentifizierung nach RFC 6143 und optional
+SSH über libssh2 mit OpenSSL. Der VNC-Transport benötigt weiterhin ein
+vertrauenswürdiges Netz oder VPN. SSH bereitet die Verbindung vor und tunnelt
+den VNC-Verkehr nicht.
 
 ## Bedienung
 
@@ -98,6 +108,36 @@ VNC-Passwort-Authentifizierung (DES-Challenge, Standardverfahren von RFC
 `host::5901`), Passwort. Macs mit Bildschirmfreigabe im selben WLAN
 erscheinen unter „In der Nähe“ (Bonjour). Über Tailscale müssen Namen von
 Hand eingetragen werden; MagicDNS löst sie auf, sobald das VPN aktiv ist.
+
+**Erreichbarkeit & Start:** Im Bearbeitungsformular alternative VNC-Adressen,
+SSH-Anmeldung und Wake-on-LAN ergänzen. **Verbinden** prüft Hauptadresse und
+Alternativen der Reihe nach. Eine abgelehnte VNC-Anmeldung wird nicht über die
+nächste Adresse wiederholt. Wenn keine Verbindung möglich ist, bietet die App
+je nach Konfiguration **Per SSH anmelden** und **Aufwecken & verbinden** an.
+Nach diesen Aktionen wartet sie bis zu 90 Sekunden auf VNC. Während des Wartens
+nach dem Aufwecken kann direkt zur SSH-Anmeldung gewechselt werden.
+
+Beim ersten SSH-Zugriff den angezeigten SHA-256-Fingerabdruck über einen
+bekannten Zugang prüfen und bestätigen. Ein geänderter Geräteschlüssel stoppt
+die Anmeldung. SSH-Passwörter, mehrstufige Anmeldeabfragen und
+Schlüssel-Passphrasen werden erst bei Bedarf abgefragt und nicht gespeichert.
+Private Schlüssel über die Dateien-App importieren. Sie bleiben im
+Geräteschlüsselbund; temporäre Dateikopien sind auf einen Versuch beschränkt.
+
+Zum Aufwecken mindestens ein **Zugangsgerät** im LAN des Zielcomputers eintragen.
+Das kann ein Raspberry Pi, NAS, Mac, Linux- oder Windows-Rechner mit SSH sein.
+Mehrere Geräte werden der Reihe nach versucht. macOS, Linux und NAS benötigen
+Python 3 oder Perl, Windows PowerShell. Die iOS-App ist ausschließlich der
+Client und muss nicht dauerhaft laufen. Direkte Broadcasts vom iPhone oder
+iPad werden nicht angeboten, da Apple dafür eine
+[gesonderte Berechtigung](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.networking.multicast)
+verlangt.
+
+SSH kann auf geeigneten Macs eine Anmeldung vor dem Start der
+Bildschirmfreigabe ermöglichen. Ob FileVault damit entsperrt werden kann,
+hängt von Hardware, macOS und der Netzverfügbarkeit vor dem Entsperren ab.
+Ein SSH-Abbruch bestätigt keine Entsperrung. Ein echter FileVault-Neustart
+wurde bisher nicht geprüft.
 
 **Gesten (Finger):**
 

@@ -724,8 +724,13 @@ mod tests {
                 }
             }
         });
-        let connection =
-            Connection::open(&address.to_string(), Some("test"), PixelFormat::BGRX, || {}).unwrap();
+        let connection = Connection::from_stream(
+            std::net::TcpStream::connect(address).unwrap(),
+            Some("test"),
+            PixelFormat::BGRX,
+            || {},
+        )
+        .unwrap();
         (connection, task)
     }
 

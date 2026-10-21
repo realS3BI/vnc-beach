@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/rfb", "crates/beach-server", "crates/beach-viewer", "crates/beach-mobile"]
+members = ["crates/rfb", "crates/beach-server", "crates/beach-viewer", "crates/beach-mobile", "crates/beach-access"]
 
 [workspace.package]
 version = "0.2.4"

@@ -10,11 +10,15 @@
 		00A1BD1FFECEF470A4D948EF /* KeysymTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4108CB6F861CD66EBE3E057E /* KeysymTests.swift */; };
 		09BFCD56DC56F13BE8AD4370 /* ScreenRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DFDC9AAB63A602EED3F842B /* ScreenRenderer.swift */; };
 		0C1FF049DD449808B741DB8C /* UpdateBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC82760D1D7989C816CD1860 /* UpdateBanner.swift */; };
+		11531D0926BB2B157BDB21DB /* AccessFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10FD0EFFFA9CCB6ADFF3E37D /* AccessFlowTests.swift */; };
+		1377C8A8F1FD5161B0BFEF0B /* AccessSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA065C5BD24F2A5955D9CC6D /* AccessSettings.swift */; };
+		1C7439EB5897743BDA8BAE25 /* AccessSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8271ADFF1A43E4B15DF2FB3 /* AccessSettingsView.swift */; };
 		2482581DE994247B6D437E2A /* RemoteSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0253FC239341452BB7880BD9 /* RemoteSession.swift */; };
 		2F5FD4D85DC3501589B1309F /* RemoteScreenRepresentable.swift in Sources */ = {isa = PBXBuildFile; fileRef = FED544FD8AE1109B7003E436 /* RemoteScreenRepresentable.swift */; };
 		32C447DD3FB37D074570616B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 892C9961B48C5999570E3DBA /* Assets.xcassets */; };
 		3561F56EBCF1169EDAB2822A /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72A63C0961BF5614404844DD /* Keychain.swift */; };
 		496331CCB4C68CEA63445449 /* Discovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93D7FD570E795FB1B1F65B90 /* Discovery.swift */; };
+		4A386E9C0F39DEA207C01969 /* SSHKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD73F798DBE4766B41567A58 /* SSHKeyStore.swift */; };
 		4AD2CA32C2DB8A5AF111B262 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC726F7D014DE20368459D35 /* UpdateChecker.swift */; };
 		528A578C1151B5678C640E58 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 6A3F3912BB84159B67F29605 /* PrivacyInfo.xcprivacy */; };
 		5F02A936E50CD30D50EFB76C /* ScrollPadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 886137D78B31AFDDFBD5D0A4 /* ScrollPadView.swift */; };
@@ -22,9 +26,11 @@
 		72BB61D9877D6DE5D669A672 /* UpdateCheckerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FE47949D74EC62D1DF0A741 /* UpdateCheckerTests.swift */; };
 		7532438D51992B5363DD8DAF /* ExtraKeysBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97C63C1F8CEBC6008373A53B /* ExtraKeysBar.swift */; };
 		78919DF43B2886CBAD115768 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFF3B595A64B4CAFE6532F9F /* SettingsView.swift */; };
+		7C071FFAAEBB3B9119BF48A2 /* AccessPromptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A42C492E6F74987494004D1F /* AccessPromptView.swift */; };
 		B5951E373382D4BDF0341601 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 776EDB19322978BDF32596DC /* AppSettings.swift */; };
 		BDDF7E1788D6DE51CECEFA8B /* VNCBeachApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B9745563D5FF4EFD28418F2 /* VNCBeachApp.swift */; };
 		C24A37D53C8D4ABB30082440 /* Keysyms.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AB7FFE5F074BFD24A9E4441 /* Keysyms.swift */; };
+		CB96F243541F28998C73BB7B /* AccessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E421221C7DAFF7E0D35923D /* AccessTests.swift */; };
 		DE781C76C3807AEEDC3EB54E /* ServerStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C61DB165EEA30D1BAD1DADB /* ServerStoreTests.swift */; };
 		DFFE0D67F00CDDA496A5B228 /* ServerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E30BCB99733277F66C548438 /* ServerStore.swift */; };
 		E3A872DF90EAA47039DE0F73 /* ServerEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B7ED6266419367C539D147 /* ServerEditView.swift */; };
@@ -41,18 +47,27 @@
 			remoteGlobalIDString = 18899B877839D37ADD06F4C8;
 			remoteInfo = VNCBeach;
 		};
+		F8511BFEA7B3F6BEBE380462 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A6BEB79598DDC52833305E26 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 18899B877839D37ADD06F4C8;
+			remoteInfo = VNCBeach;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		0253FC239341452BB7880BD9 /* RemoteSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSession.swift; sourceTree = "<group>"; };
 		076659D11F3EDE0F251F1CAD /* Server.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Server.swift; sourceTree = "<group>"; };
 		0FE47949D74EC62D1DF0A741 /* UpdateCheckerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCheckerTests.swift; sourceTree = "<group>"; };
+		10FD0EFFFA9CCB6ADFF3E37D /* AccessFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessFlowTests.swift; sourceTree = "<group>"; };
 		15B7ED6266419367C539D147 /* ServerEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerEditView.swift; sourceTree = "<group>"; };
 		186D88CCB73C2F8081B7BDAB /* ServerListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerListView.swift; sourceTree = "<group>"; };
 		2D30A5514684CCD857C9A24D /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
 		3AB7FFE5F074BFD24A9E4441 /* Keysyms.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keysyms.swift; sourceTree = "<group>"; };
 		3C61DB165EEA30D1BAD1DADB /* ServerStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerStoreTests.swift; sourceTree = "<group>"; };
 		3DFDC9AAB63A602EED3F842B /* ScreenRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenRenderer.swift; sourceTree = "<group>"; };
+		3E421221C7DAFF7E0D35923D /* AccessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessTests.swift; sourceTree = "<group>"; };
 		4108CB6F861CD66EBE3E057E /* KeysymTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeysymTests.swift; sourceTree = "<group>"; };
 		6775F3058D85841ADA2C78B0 /* RemoteScreenView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteScreenView.swift; sourceTree = "<group>"; };
 		6A3F3912BB84159B67F29605 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -65,10 +80,15 @@
 		892C9961B48C5999570E3DBA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		93D7FD570E795FB1B1F65B90 /* Discovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Discovery.swift; sourceTree = "<group>"; };
 		97C63C1F8CEBC6008373A53B /* ExtraKeysBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtraKeysBar.swift; sourceTree = "<group>"; };
+		985B7A57E94B00B7D4CCF27C /* VNCBeachUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = VNCBeachUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9B9745563D5FF4EFD28418F2 /* VNCBeachApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VNCBeachApp.swift; sourceTree = "<group>"; };
+		A42C492E6F74987494004D1F /* AccessPromptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessPromptView.swift; sourceTree = "<group>"; };
+		AA065C5BD24F2A5955D9CC6D /* AccessSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessSettings.swift; sourceTree = "<group>"; };
+		AD73F798DBE4766B41567A58 /* SSHKeyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHKeyStore.swift; sourceTree = "<group>"; };
 		BC726F7D014DE20368459D35 /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
 		BFF3B595A64B4CAFE6532F9F /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		E30BCB99733277F66C548438 /* ServerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerStore.swift; sourceTree = "<group>"; };
+		F8271ADFF1A43E4B15DF2FB3 /* AccessSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessSettingsView.swift; sourceTree = "<group>"; };
 		FA3A76B7834EA3704F18595D /* VNCBeach.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = VNCBeach.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FC82760D1D7989C816CD1860 /* UpdateBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateBanner.swift; sourceTree = "<group>"; };
 		FED544FD8AE1109B7003E436 /* RemoteScreenRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteScreenRepresentable.swift; sourceTree = "<group>"; };
@@ -91,12 +111,21 @@
 			path = Resources;
 			sourceTree = "<group>";
 		};
+		7B138452A7E406C89EF45BC2 /* VNCBeachUITests */ = {
+			isa = PBXGroup;
+			children = (
+				10FD0EFFFA9CCB6ADFF3E37D /* AccessFlowTests.swift */,
+			);
+			path = VNCBeachUITests;
+			sourceTree = "<group>";
+		};
 		8D1B3FC72ECD8337CFF5A67B = {
 			isa = PBXGroup;
 			children = (
 				11A1C03BED81FC8BEE4C0B27 /* Config */,
 				BBD987253DDE060921644AFA /* VNCBeach */,
 				999D72692593433D7892262F /* VNCBeachTests */,
+				7B138452A7E406C89EF45BC2 /* VNCBeachUITests */,
 				DF98DBB53DA538F08D95E265 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -104,6 +133,8 @@
 		91640ADF0D82AA1E4EC657B4 /* UI */ = {
 			isa = PBXGroup;
 			children = (
+				A42C492E6F74987494004D1F /* AccessPromptView.swift */,
+				F8271ADFF1A43E4B15DF2FB3 /* AccessSettingsView.swift */,
 				15B7ED6266419367C539D147 /* ServerEditView.swift */,
 				186D88CCB73C2F8081B7BDAB /* ServerListView.swift */,
 				7E2DD72B6ABB5B47B29FE65A /* SessionScreen.swift */,
@@ -128,6 +159,7 @@
 		999D72692593433D7892262F /* VNCBeachTests */ = {
 			isa = PBXGroup;
 			children = (
+				3E421221C7DAFF7E0D35923D /* AccessTests.swift */,
 				4108CB6F861CD66EBE3E057E /* KeysymTests.swift */,
 				3C61DB165EEA30D1BAD1DADB /* ServerStoreTests.swift */,
 				0FE47949D74EC62D1DF0A741 /* UpdateCheckerTests.swift */,
@@ -138,6 +170,7 @@
 		A31949E0EF5A11A46C40FB5C /* Model */ = {
 			isa = PBXGroup;
 			children = (
+				AA065C5BD24F2A5955D9CC6D /* AccessSettings.swift */,
 				776EDB19322978BDF32596DC /* AppSettings.swift */,
 				72A63C0961BF5614404844DD /* Keychain.swift */,
 				076659D11F3EDE0F251F1CAD /* Server.swift */,
@@ -174,6 +207,7 @@
 			children = (
 				FA3A76B7834EA3704F18595D /* VNCBeach.app */,
 				714154E59008E734366BA933 /* VNCBeachTests.xctest */,
+				985B7A57E94B00B7D4CCF27C /* VNCBeachUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -184,6 +218,7 @@
 				93D7FD570E795FB1B1F65B90 /* Discovery.swift */,
 				3AB7FFE5F074BFD24A9E4441 /* Keysyms.swift */,
 				0253FC239341452BB7880BD9 /* RemoteSession.swift */,
+				AD73F798DBE4766B41567A58 /* SSHKeyStore.swift */,
 				BC726F7D014DE20368459D35 /* UpdateChecker.swift */,
 			);
 			path = Core;
@@ -210,6 +245,24 @@
 			productName = VNCBeach;
 			productReference = FA3A76B7834EA3704F18595D /* VNCBeach.app */;
 			productType = "com.apple.product-type.application";
+		};
+		4ABD03F2CCCD56FAFF8E73A7 /* VNCBeachUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4315F175D828827457ACE6AC /* Build configuration list for PBXNativeTarget "VNCBeachUITests" */;
+			buildPhases = (
+				0EB53EBDC4AE3C38C974CCB6 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D4115C4025E1046EA4FFD96C /* PBXTargetDependency */,
+			);
+			name = VNCBeachUITests;
+			packageProductDependencies = (
+			);
+			productName = VNCBeachUITests;
+			productReference = 985B7A57E94B00B7D4CCF27C /* VNCBeachUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 		657CF6FF3080EDFEA52EEBB1 /* VNCBeachTests */ = {
 			isa = PBXNativeTarget;
@@ -241,6 +294,10 @@
 					18899B877839D37ADD06F4C8 = {
 						ProvisioningStyle = Automatic;
 					};
+					4ABD03F2CCCD56FAFF8E73A7 = {
+						ProvisioningStyle = Automatic;
+						TestTargetID = 18899B877839D37ADD06F4C8;
+					};
 					657CF6FF3080EDFEA52EEBB1 = {
 						ProvisioningStyle = Automatic;
 					};
@@ -262,6 +319,7 @@
 			targets = (
 				18899B877839D37ADD06F4C8 /* VNCBeach */,
 				657CF6FF3080EDFEA52EEBB1 /* VNCBeachTests */,
+				4ABD03F2CCCD56FAFF8E73A7 /* VNCBeachUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -301,10 +359,19 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		0EB53EBDC4AE3C38C974CCB6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				11531D0926BB2B157BDB21DB /* AccessFlowTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		3B7C0A30D9AC301224ECCCF0 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CB96F243541F28998C73BB7B /* AccessTests.swift in Sources */,
 				00A1BD1FFECEF470A4D948EF /* KeysymTests.swift in Sources */,
 				DE781C76C3807AEEDC3EB54E /* ServerStoreTests.swift in Sources */,
 				72BB61D9877D6DE5D669A672 /* UpdateCheckerTests.swift in Sources */,
@@ -315,6 +382,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7C071FFAAEBB3B9119BF48A2 /* AccessPromptView.swift in Sources */,
+				1377C8A8F1FD5161B0BFEF0B /* AccessSettings.swift in Sources */,
+				1C7439EB5897743BDA8BAE25 /* AccessSettingsView.swift in Sources */,
 				B5951E373382D4BDF0341601 /* AppSettings.swift in Sources */,
 				496331CCB4C68CEA63445449 /* Discovery.swift in Sources */,
 				7532438D51992B5363DD8DAF /* ExtraKeysBar.swift in Sources */,
@@ -323,6 +393,7 @@
 				2F5FD4D85DC3501589B1309F /* RemoteScreenRepresentable.swift in Sources */,
 				FD2BF0781DFCFE4532CAE72D /* RemoteScreenView.swift in Sources */,
 				2482581DE994247B6D437E2A /* RemoteSession.swift in Sources */,
+				4A386E9C0F39DEA207C01969 /* SSHKeyStore.swift in Sources */,
 				09BFCD56DC56F13BE8AD4370 /* ScreenRenderer.swift in Sources */,
 				5F02A936E50CD30D50EFB76C /* ScrollPadView.swift in Sources */,
 				F0920348FEBC5160F8D997E6 /* Server.swift in Sources */,
@@ -345,6 +416,11 @@
 			target = 18899B877839D37ADD06F4C8 /* VNCBeach */;
 			targetProxy = 25A1189D698C9F5F172F177B /* PBXContainerItemProxy */;
 		};
+		D4115C4025E1046EA4FFD96C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 18899B877839D37ADD06F4C8 /* VNCBeach */;
+			targetProxy = F8511BFEA7B3F6BEBE380462 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -365,7 +441,7 @@
 					"@executable_path/Frameworks",
 				);
 				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/../../target/$(BEACH_RUST_TARGET)/release";
-				OTHER_LDFLAGS = "-lbeach_mobile";
+				OTHER_LDFLAGS = "-lbeach_mobile -lz";
 				PRODUCT_MODULE_NAME = VNCBeach;
 				PRODUCT_NAME = "VNC Beach";
 				SDKROOT = iphoneos;
@@ -397,6 +473,46 @@
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/VNC Beach.app/VNC Beach";
 			};
 			name = Release;
+		};
+		5608B609CEBFB91D3DBAC819 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 2D30A5514684CCD857C9A24D /* Base.xcconfig */;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = at.schlossers.vncbeach.uitests;
+				SDKROOT = iphoneos;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = VNCBeach;
+			};
+			name = Release;
+		};
+		C7A7A56824ED2ED377F25565 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 2D30A5514684CCD857C9A24D /* Base.xcconfig */;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = at.schlossers.vncbeach.uitests;
+				SDKROOT = iphoneos;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = VNCBeach;
+			};
+			name = Debug;
 		};
 		D46C03F943F10F8822E607D5 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -436,7 +552,7 @@
 					"@executable_path/Frameworks",
 				);
 				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/../../target/$(BEACH_RUST_TARGET)/release";
-				OTHER_LDFLAGS = "-lbeach_mobile";
+				OTHER_LDFLAGS = "-lbeach_mobile -lz";
 				PRODUCT_MODULE_NAME = VNCBeach;
 				PRODUCT_NAME = "VNC Beach";
 				SDKROOT = iphoneos;
@@ -570,6 +686,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		4315F175D828827457ACE6AC /* Build configuration list for PBXNativeTarget "VNCBeachUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C7A7A56824ED2ED377F25565 /* Debug */,
+				5608B609CEBFB91D3DBAC819 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		5D5F08954C21AEA83372C424 /* Build configuration list for PBXNativeTarget "VNCBeachTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

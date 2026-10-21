@@ -34,9 +34,18 @@ struct SessionScreen: View {
                 )
                 .ignoresSafeArea()
             case .idle, .connecting:
-                ProgressView("Verbinde mit \(server.displayName) …")
-                    .tint(.white)
-                    .foregroundStyle(.white)
+                VStack(spacing: 20) {
+                    ProgressView("Verbinde mit \(server.displayName) …")
+                    Text(session.preparationStatus).multilineTextAlignment(.center)
+                    if session.preparationAction == .wake, server.access?.ssh != nil {
+                        Button("Per SSH anmelden") { Task { await connect(action: .signIn) } }
+                            .buttonStyle(.bordered)
+                    }
+                    Button("Abbrechen") { session.close(byUser: true) }
+                        .buttonStyle(.bordered)
+                }
+                .padding(24).frame(maxWidth: 560)
+                .tint(.white).foregroundStyle(.white)
             case .closed(let reason):
                 closedView(reason)
             }
@@ -53,6 +62,12 @@ struct SessionScreen: View {
             }
         }
         .statusBarHidden(true)
+        .sheet(item: Binding(get: { session.prompt }, set: { _ in })) { prompt in
+            AccessPromptView(prompt: prompt,
+                answer: { session.answer(prompt, value: $0) },
+                cancel: { session.close(byUser: true) })
+                .id(prompt.id)
+        }
         .persistentSystemOverlays(.hidden)
         .task(id: server.id) {
             controller.viewOnly = server.viewOnly
@@ -189,29 +204,49 @@ struct SessionScreen: View {
     }
 
     private func closedView(_ reason: String) -> some View {
-        VStack(spacing: 16) {
-            Image(systemName: "display.trianglebadge.exclamationmark")
-                .font(.system(size: 44))
-            Text(reason.isEmpty ? "Verbindung beendet" : reason)
-                .multilineTextAlignment(.center)
-            HStack {
-                Button("Zurück") { dismiss() }
-                Button("Erneut verbinden") { Task { await connect() } }
-                    .buttonStyle(.borderedProminent)
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 16) {
+                    Image(systemName: "display.trianglebadge.exclamationmark")
+                        .font(.system(size: 44))
+                    Text(reason.isEmpty ? "Verbindung beendet" : reason)
+                        .multilineTextAlignment(.center)
+                        .textSelection(.enabled)
+                    HStack {
+                        Button("Zurück") { dismiss() }
+                        Button("Erneut verbinden") { Task { await connect() } }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    if server.access?.ssh != nil {
+                        Button("Per SSH anmelden") { Task { await connect(action: .signIn) } }
+                            .buttonStyle(.bordered)
+                    }
+                    if server.access?.wake != nil {
+                        Button("Aufwecken & verbinden") { Task { await connect(action: .wake) } }
+                            .buttonStyle(.bordered)
+                    }
+                }
+                .foregroundStyle(.white)
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .frame(maxWidth: 560)
+                .padding(.horizontal, 24)
+                .padding(.top, 80)
+                .padding(.bottom, 24)
+                .frame(maxWidth: .infinity, minHeight: geometry.size.height)
             }
         }
-        .foregroundStyle(.white)
-        .padding()
     }
 
-    private func connect() async {
+    private func connect(action: ConnectionAction = .connect) async {
         session.onClipboard = { text in
             guard AppSettings.clipboardSync else { return }
             UIPasteboard.general.string = text
             pasteboardChangeCount = UIPasteboard.general.changeCount
         }
         await session.connect(
-            address: server.host, password: store.password(for: server), depth: AppSettings.colorDepth)
+            address: server.host, password: store.password(for: server), depth: AppSettings.colorDepth,
+            access: server.access ?? AccessSettings(), action: action)
         if session.state == .connected {
             wasConnected = true
             sendPasteboard(force: false)

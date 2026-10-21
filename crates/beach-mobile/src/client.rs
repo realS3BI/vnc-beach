@@ -122,7 +122,16 @@ impl Connection {
         pf: PixelFormat,
         on_event: impl Fn(Event) + Send + 'static,
     ) -> rfb::Result<Connection> {
-        let mut stream = connect(addr)?;
+        Self::from_stream(connect(addr)?, password, pf, on_event)
+    }
+
+    /// Continues on an existing socket, matching the desktop client's entry point.
+    pub fn from_stream(
+        mut stream: TcpStream,
+        password: Option<&str>,
+        pf: PixelFormat,
+        on_event: impl Fn(Event) + Send + 'static,
+    ) -> rfb::Result<Connection> {
         stream.set_nodelay(true)?;
         stream.set_read_timeout(Some(Duration::from_secs(15)))?;
         let (init, banner) = client_handshake_with_banner(&mut stream, password)?;
@@ -213,33 +222,7 @@ impl Drop for Connection {
 
 /// Accepts `host`, `host:display` (display < 100 → port 5900+display),
 /// `host:port`, `host::port` and `[ipv6]:port`.
-pub fn parse_address(input: &str) -> String {
-    let input = input.trim();
-    if let Some((host, port)) = input.rsplit_once("::") {
-        if !host.is_empty() && port.parse::<u16>().is_ok() {
-            return format!("{host}:{port}");
-        }
-    }
-    let (host, n) = match input.rsplit_once(':') {
-        Some((h, p)) if !h.ends_with(':') && (h.starts_with('[') || !h.contains(':')) => {
-            match p.parse::<u16>() {
-                Ok(n) => (h, Some(n)),
-                Err(_) => (input, None),
-            }
-        }
-        _ => (input, None),
-    };
-    let port = match n {
-        Some(n) if n < 100 => 5900 + n,
-        Some(n) => n,
-        None => 5900,
-    };
-    if host.contains(':') && !host.starts_with('[') {
-        format!("[{host}]:{port}")
-    } else {
-        format!("{host}:{port}")
-    }
-}
+pub use beach_access::parse_address;
 
 fn connect(addr: &str) -> rfb::Result<TcpStream> {
     let mut last = None;
@@ -433,6 +416,7 @@ mod tests {
         assert_eq!(parse_address("10.0.0.2::5"), "10.0.0.2:5");
         assert_eq!(parse_address("[::1]:5901"), "[::1]:5901");
         assert_eq!(parse_address("::1"), "[::1]:5900");
+        assert_eq!(parse_address("fd00::9"), "[fd00::9]:5900");
     }
 
     #[test]

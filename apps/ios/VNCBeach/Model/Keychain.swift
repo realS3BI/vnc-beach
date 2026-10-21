@@ -24,16 +24,19 @@ struct Keychain {
         return String(data: data, encoding: .utf8)
     }
 
-    func write(_ value: String, account: String) {
+    @discardableResult
+    func write(_ value: String, account: String,
+               accessibility: CFString = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly) -> OSStatus {
         let data = Data(value.utf8)
         let update: [String: Any] = [kSecValueData as String: data]
         let status = SecItemUpdate(query(account) as CFDictionary, update as CFDictionary)
         if status == errSecItemNotFound {
             var q = query(account)
             q[kSecValueData as String] = data
-            q[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            SecItemAdd(q as CFDictionary, nil)
+            q[kSecAttrAccessible as String] = accessibility
+            return SecItemAdd(q as CFDictionary, nil)
         }
+        return status
     }
 
     func delete(account: String) {

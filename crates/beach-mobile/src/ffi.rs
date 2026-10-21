@@ -12,6 +12,9 @@ use rfb::PixelFormat;
 
 use crate::client::{parse_address, Connection, Event, RemoteKind};
 
+mod preparation;
+pub use preparation::*;
+
 pub const EVENT_FRAME: i32 = 0;
 pub const EVENT_CLIPBOARD: i32 = 1;
 pub const EVENT_CLOSED: i32 = 2;
@@ -233,7 +236,11 @@ pub struct BeachScreen {
 /// # Safety
 /// `out` must have room for `max` entries (or be NULL with `max` 0).
 #[no_mangle]
-pub unsafe extern "C" fn beach_session_screens(session: *mut BeachSession, out: *mut BeachScreen, max: usize) -> usize {
+pub unsafe extern "C" fn beach_session_screens(
+    session: *mut BeachSession,
+    out: *mut BeachScreen,
+    max: usize,
+) -> usize {
     let Some(s) = (unsafe { with(session) }) else {
         return 0;
     };
@@ -268,7 +275,8 @@ pub unsafe extern "C" fn beach_session_set_region(
     height: u32,
 ) {
     if let Some(s) = unsafe { with(session) } {
-        let region = (width > 0 && height > 0).then_some((x as usize, y as usize, width as usize, height as usize));
+        let region =
+            (width > 0 && height > 0).then_some((x as usize, y as usize, width as usize, height as usize));
         s.conn.set_region(region);
     }
 }

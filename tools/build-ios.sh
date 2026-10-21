@@ -16,6 +16,9 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 # Xcode exports SDK paths for the C compiler that confuse cargo's build scripts.
 unset SDKROOT IPHONEOS_DEPLOYMENT_TARGET MACOSX_DEPLOYMENT_TARGET
 unset CC CXX LD CFLAGS CXXFLAGS LDFLAGS
+# C dependencies (libssh2/OpenSSL) otherwise inherit the current SDK version
+# as their minimum OS, even when the Swift target supports older devices.
+export IPHONEOS_DEPLOYMENT_TARGET=18.0
 export CARGO_TERM_COLOR=never
 
 cargo=""
