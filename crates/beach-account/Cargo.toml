@@ -1,0 +1,17 @@
+[package]
+name = "beach-account"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "VNC Beach accounts: coordination server API types and connection tickets"
+
+[dependencies]
+base64 = "0.22"
+ed25519-dalek = "3"
+rfb = { version = "0.2.5", path = "../rfb" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
+[lints]
+workspace = true

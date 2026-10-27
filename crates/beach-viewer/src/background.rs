@@ -18,7 +18,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 
 use crate::config::{self, Config};
 use crate::control::{self, Command, Endpoint, Status};
-use crate::{autostart, icon, service};
+use crate::{account, autostart, icon, service};
 
 pub fn run() -> anyhow::Result<()> {
     if control::call_at(Endpoint::Tray, Command::Status).is_some() {
@@ -28,6 +28,7 @@ pub fn run() -> anyhow::Result<()> {
     let state = Arc::new(Mutex::new(State::load(Role::Tray, None)));
     state.lock().unwrap().apply();
     let quit = Arc::new(AtomicBool::new(false));
+    spawn_heartbeat(state.clone());
     control::serve(Endpoint::Tray, {
         let (state, quit) = (state.clone(), quit.clone());
         move |cmd| handle(&state, &quit, cmd)
@@ -72,6 +73,7 @@ pub fn run_agent(home: Option<std::path::PathBuf>) -> anyhow::Result<()> {
     let state = Arc::new(Mutex::new(State::load(Role::Agent, home)));
     state.lock().unwrap().apply();
     let quit = Arc::new(AtomicBool::new(false));
+    spawn_heartbeat(state.clone());
     control::serve(Endpoint::Service, {
         let (state, quit) = (state.clone(), quit.clone());
         move |cmd| handle(&state, &quit, cmd)
@@ -109,16 +111,70 @@ fn agent_loop(state: &Mutex<State>, quit: &AtomicBool) {
     control::forget(Endpoint::Service);
 }
 
+/// Reports this computer's addresses to the coordination server every
+/// minute while the server runs here (not in a tray process that left the
+/// server to the Windows service). A rejected device token means the device
+/// was removed from the account: the link is dropped.
+fn spawn_heartbeat(state: Arc<Mutex<State>>) {
+    let spawned = std::thread::Builder::new().name("heartbeat".into()).spawn(move || {
+        let mut sent: Option<(account::DeviceLink, u16)> = None;
+        let mut next = Instant::now();
+        loop {
+            std::thread::sleep(Duration::from_secs(5));
+            let wanted = {
+                let st = state.lock().unwrap();
+                match (&st.config.server.device, &st.server) {
+                    (Some(link), Some(_)) if !st.delegated() => Some((link.clone(), st.config.server.port)),
+                    _ => None,
+                }
+            };
+            let Some(wanted) = wanted else {
+                sent = None;
+                continue;
+            };
+            if sent.as_ref() == Some(&wanted) && Instant::now() < next {
+                continue;
+            }
+            let (link, port) = &wanted;
+            match account::heartbeat(link, *port) {
+                Ok(()) => log::debug!("heartbeat sent to {}", link.url),
+                Err(account::Error::Unauthorized) => {
+                    log::warn!("device {} is no longer registered at {}", link.id, link.url);
+                    let mut st = state.lock().unwrap();
+                    let mut fresh = config::load();
+                    if fresh.server.device.as_ref().is_some_and(|d| d.id == link.id) {
+                        fresh.server.device = None;
+                        if let Err(e) = config::save(&fresh) {
+                            log::warn!("cannot save config: {e}");
+                        }
+                    }
+                    st.config = fresh;
+                    st.apply();
+                }
+                Err(e) => log::info!("heartbeat: {e}"),
+            }
+            sent = Some(wanted);
+            next = Instant::now() + Duration::from_secs(60);
+        }
+    });
+    if let Err(e) = spawned {
+        log::warn!("cannot start the heartbeat: {e}");
+    }
+}
+
 fn handle(state: &Mutex<State>, quit: &AtomicBool, cmd: Command) -> Status {
     let mut st = state.lock().unwrap();
     match cmd {
         Command::Status => {}
         Command::Start => {
+            // The viewer may have changed the file since (e.g. signed in).
+            st.config = config::load();
             st.config.server.enabled = true;
             st.save();
             st.apply();
         }
         Command::Stop => {
+            st.config = config::load();
             st.config.server.enabled = false;
             st.save();
             st.apply();
@@ -189,6 +245,7 @@ impl State {
             view_only: s.view_only,
             name: None,
             home: self.home.clone(),
+            tickets: s.device.as_ref().and_then(|d| d.verifier()),
         }
     }
 

@@ -233,7 +233,7 @@ fn curl(args: &[&str]) -> Result<Vec<u8>, String> {
     }
 }
 
-fn curl_path() -> PathBuf {
+pub(crate) fn curl_path() -> PathBuf {
     #[cfg(windows)]
     if let Some(root) = std::env::var_os("SystemRoot") {
         let path = PathBuf::from(root).join(r"System32\curl.exe");

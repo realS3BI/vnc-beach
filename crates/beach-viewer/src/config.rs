@@ -18,6 +18,7 @@ use beach_server::Display;
 use serde::{Deserialize, Serialize};
 
 use crate::servers::{self, config_dir};
+use crate::account::{AccountConfig, DeviceLink};
 use crate::settings::Settings;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,6 +26,8 @@ use crate::settings::Settings;
 pub struct Config {
     pub viewer: Settings,
     pub server: ServerConfig,
+    /// The account signed in to in the viewer.
+    pub account: AccountConfig,
 }
 
 /// The built-in server (Windows). The password is obfuscated on disk like
@@ -52,6 +55,9 @@ pub struct ServerConfig {
     #[serde(with = "display_toml")]
     pub display: Display,
     pub fps: u32,
+    /// Registered with a coordination server: accept its tickets and
+    /// report addresses there.
+    pub device: Option<DeviceLink>,
 }
 
 /// `display = "all"`, `display = "primary"` or `display = 1`.
@@ -96,6 +102,7 @@ impl Default for ServerConfig {
             service_declined: String::new(),
             display: Display::All,
             fps: 60,
+            device: None,
         }
     }
 }
@@ -143,6 +150,12 @@ fn save_to(config: &Config, path: &Path) -> io::Result<()> {
     text.push_str(&toml::to_string(config).map_err(io::Error::other)?);
     let tmp = path.with_extension("toml.tmp");
     fs::write(&tmp, text)?;
+    // Holds the account's session and device tokens.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))?;
+    }
     fs::rename(&tmp, path)
 }
 
@@ -160,6 +173,20 @@ mod tests {
         config.viewer.colors = Colors::Medium;
         config.server.password = "geheim".into();
         config.server.port = 5999;
+        config.account = AccountConfig {
+            url: "https://beach.example.com".into(),
+            token: "session".into(),
+            name: "Alice".into(),
+            login: "alice".into(),
+        };
+        config.server.device = Some(DeviceLink {
+            url: "https://beach.example.com".into(),
+            id: "dev".into(),
+            token: "device-token".into(),
+            key: "key".into(),
+            name: "Büro".into(),
+            owner: "Persönlich".into(),
+        });
         save_to(&config, &path).unwrap();
         let text = fs::read_to_string(&path).unwrap();
         assert!(!text.contains("geheim"), "{text}");

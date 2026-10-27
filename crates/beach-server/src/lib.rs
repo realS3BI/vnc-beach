@@ -40,6 +40,9 @@ pub struct Options {
     /// Root for file transfers. The Windows service runs as SYSTEM and sets
     /// the signed-in user's profile here; `None` is the current user's home.
     pub home: Option<std::path::PathBuf>,
+    /// Also accept tickets of the coordination server this device is
+    /// registered with (see `beach_account`).
+    pub tickets: Option<beach_account::ticket::Verifier>,
 }
 
 impl Default for Options {
@@ -53,6 +56,7 @@ impl Default for Options {
             view_only: false,
             name: None,
             home: None,
+            tickets: None,
         }
     }
 }
@@ -102,6 +106,7 @@ impl Server {
             file_transfer: !opts.view_only,
             home: opts.home,
             password: opts.password,
+            tickets: opts.tickets,
             fps: opts.fps,
             name: opts.name.unwrap_or_else(|| {
                 format!(

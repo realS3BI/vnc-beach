@@ -600,6 +600,8 @@ impl ServerPanel {
             if draft.password.is_empty() {
                 draft.password = beach_server::random_password();
             }
+            // Linked to the account from the sidebar in the meantime.
+            draft.device = config.server.device.clone();
             config.server = draft;
             self.error = config::save(config)
                 .map_err(|e| format!("Speichern fehlgeschlagen: {e}"))

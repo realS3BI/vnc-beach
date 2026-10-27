@@ -6,8 +6,11 @@ pub use beach_access::{Access, Action, Answer, Authentication, Event, Prompt, Re
 
 pub type Task = beach_access::Task<Connection>;
 
+/// Connects to `server`; with `account`, through an account ticket (the
+/// password, if any, stays the fallback for servers without one).
 pub fn start(
     server: Server,
+    account: Option<crate::account::Target>,
     action: Action,
     pf: rfb::PixelFormat,
     repaint: impl Fn() + Send + Sync + 'static,
@@ -25,6 +28,7 @@ pub fn start(
             Connection::from_stream(
                 stream,
                 (!server.password.is_empty()).then_some(server.password.as_str()),
+                account.as_ref(),
                 pf,
                 move || repaint(),
             )
