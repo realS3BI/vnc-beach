@@ -59,7 +59,7 @@ cargo test -p beach-server --lib headless::windows::tests::real_virtual_monitor_
 
 Der erste Test listet nur Grafikadapter und Monitore auf. Der zweite fügt kurz einen echten virtuellen Bildschirm hinzu, stellt 2560 × 1440 ein, prüft das und entfernt ihn wieder. Er ändert die Bildschirmanordnung, also nur auf einem Rechner ausführen, den man notfalls direkt bedienen kann. Ein laufender VNC-Beach-Server hält den Testbildschirm nicht für seinen eigenen und entfernt ihn deshalb nicht.
 
-Praxisprüfung mit einem Zuschauer (`cargo run --release -p rfb --example snapshot -- HOST:PORT PASSWORT out.ppm` holt ein vollständiges Bild):
+Praxisprüfung mit einem Zuschauer: `cargo run --release -p rfb --example snapshot -- HOST:PORT PASSWORT out.ppm` holt ein vollständiges Bild. `cargo run --release -p rfb --example watch_size -- HOST:PORT PASSWORT` bleibt verbunden und meldet jede Größenänderung samt dem ersten vollständigen Bild danach.
 
 1. Alle Monitore ausschalten: Nach wenigen Sekunden zeigt `snapshot` 2560 × 1440, und Windows meldet genau einen Bildschirm.
 2. Verbindung trennen und neu verbinden, mehrere Minuten warten: Es kommt kein zweiter virtueller Bildschirm hinzu.
