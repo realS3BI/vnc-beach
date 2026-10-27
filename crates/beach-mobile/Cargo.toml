@@ -10,8 +10,8 @@ name = "beach_mobile"
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-rfb = { version = "0.3.0", path = "../rfb" }
-beach-access = { version = "0.3.0", path = "../beach-access" }
+rfb = { version = "0.3.1", path = "../rfb" }
+beach-access = { version = "0.3.1", path = "../beach-access" }
 anyhow = "1"
 serde_json = "1"
 zeroize = "1"
