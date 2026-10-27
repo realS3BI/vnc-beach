@@ -3,9 +3,10 @@
 //! `beach_server::headless` and `docs/headless-windows.md`).
 //!
 //! `--install-display-driver` runs elevated: it downloads the unmodified
-//! package from the vendor, checks it against a pinned SHA-256 and its
-//! Authenticode signatures, installs it with the vendor's `deviceinstaller64`
-//! (Windows checks the driver signature itself) and sets 2560×1440 as the
+//! package from the vendor, checks it against a pinned SHA-256 and the
+//! Microsoft (WHCP) signatures of the driver catalog and DLL, installs it with
+//! the vendor's `deviceinstaller64` (unsigned, covered by the SHA-256; Windows
+//! checks the driver signature again) and sets 2560×1440 as the
 //! driver's default resolution. The package is kept, with its license, in
 //! `%ProgramData%\VNC Beach\usbmmidd_v2`.
 
@@ -43,7 +44,7 @@ pub fn install() -> anyhow::Result<()> {
         let dir = package_dir()?;
         fetch(&dir)?;
         let package = dir.join("usbmmidd_v2");
-        for file in ["usbmmIdd.cat", "deviceinstaller64.exe"] {
+        for file in ["usbmmIdd.cat", r"x64\usbmmIdd.dll"] {
             check_signature(&package.join(file))?;
         }
         // Its exit code isn't documented; whether the driver is there afterwards is.
@@ -110,7 +111,11 @@ fn fetch(dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Fails unless Windows reports a valid Authenticode signature for `file`.
+/// Signer of the driver catalog and DLL (Microsoft's attestation signing).
+const DRIVER_SIGNER: &str = "CN=Microsoft Windows Hardware Compatibility Publisher";
+
+/// Fails unless Windows reports a valid Authenticode signature by
+/// [`DRIVER_SIGNER`] for `file`.
 fn check_signature(file: &Path) -> anyhow::Result<()> {
     let script = format!(
         "$s = Get-AuthenticodeSignature -LiteralPath '{}'; \"$($s.Status)|$($s.SignerCertificate.Subject)\"",
@@ -126,8 +131,11 @@ fn check_signature(file: &Path) -> anyhow::Result<()> {
     )?;
     let (status, signer) = out.trim().split_once('|').unwrap_or((out.trim(), ""));
     log::info!("{}: signature {status}, {signer}", file.display());
-    if status != "Valid" {
-        bail!("{} has no valid signature ({status})", file.display());
+    if status != "Valid" || !signer.starts_with(DRIVER_SIGNER) {
+        bail!(
+            "{} is not signed by Microsoft for Windows ({status}, {signer:?})",
+            file.display()
+        );
     }
     Ok(())
 }

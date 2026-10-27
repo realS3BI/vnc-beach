@@ -19,7 +19,7 @@ Einmalig pro PC, mit Administratorrechten:
 Die Einrichtung
 
 1. lädt das unveränderte Paket von <https://www.amyuni.com/downloads/usbmmidd_v2.zip> und bricht ab, wenn es nicht genau der geprüften Fassung entspricht (SHA-256 `629b51e9944762bae73948171c65d09a79595cf4c771a82ebc003fbba5b24f51`, Treiberversion 2.0.0.1 vom 31. August 2021),
-2. prüft die Windows-Signaturen von Treiberkatalog und Installationsprogramm,
+2. prüft, dass Treiberkatalog und Treiber-DLL gültig von Microsoft („Microsoft Windows Hardware Compatibility Publisher“) signiert sind. Das Installationsprogramm `deviceinstaller64.exe` des Herstellers ist nicht signiert; seine Echtheit sichert der SHA-256-Wert des Pakets,
 3. installiert den Treiber mit dem mitgelieferten `deviceinstaller64.exe install usbmmidd.inf usbmmidd`. Die Signaturprüfung von Windows bleibt dabei aktiv, die Herstellerdateien werden nicht verändert,
 4. setzt die Standardauflösung des Treibers auf 2560 × 1440 (`HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\WUDF\Services\usbmmIdd\Parameters\Monitors`, Standardwert `2560,1440`).
 
