@@ -12,18 +12,18 @@ Server und Viewer sprechen Standard-VNC (RFB 3.8, RFC 6143). Der VNC-Beach-Viewe
 | --- | --- | --- | --- |
 | macOS | ja | ja | Eine App; Symbol in der Menüleiste; auf Wunsch schon am Anmeldefenster erreichbar. Braucht Bildschirmaufnahme und Bedienungshilfen. Alternativ die eingebaute Bildschirmfreigabe als Server (ohne Zwischenablage). |
 | Windows (64-Bit, 10/11) | ja | ja | Eine Datei; Symbol im Infobereich; als Windows-Dienst auch im Sperr- und Anmeldebildschirm erreichbar. **Ohne eingeschaltete Monitore** braucht es einmalig den virtuellen Bildschirmtreiber `usbmmidd_v2` von Amyuni, siehe [Ohne eingeschaltete Monitore](#ohne-eingeschaltete-monitore-windows). |
-| iPad und iPhone (iOS 18+) | ja | nein | Nur Viewer: verbindet sich mit jedem VNC-Server, teilt aber keinen eigenen Bildschirm. Verteilung per TestFlight, siehe [iPad und iPhone](#ipad-und-iphone). |
+| iPad und iPhone (iOS 18+) | ja | nein | Nur Viewer: verbindet sich mit jedem VNC-Server, teilt aber keinen eigenen Bildschirm. Derzeit in der Testphase über TestFlight, noch nicht öffentlich, siehe [iPad und iPhone](#ipad-und-iphone). |
 
 Der Betrieb ohne Monitor ist nur auf Windows ein Thema. Auf dem Mac gibt es die Funktion nicht und sie wurde dort auch nicht gebraucht: Ein Mac ohne angeschlossenen Monitor behält einen Bildschirm in Standardauflösung, den VNC Beach oder die Bildschirmfreigabe übertragen. Wer dort eine bestimmte Auflösung braucht, nimmt einen HDMI-Dummy-Stecker. Die iOS-App hat keinen Server und ist davon nicht betroffen.
 
 ## Stand
 
-Erste lauffähige Version (0.1). Umgesetzt:
+Version 0.2.5. Umgesetzt:
 
 - Bildschirmübertragung mit ZRLE-Kompression; gesendet werden nur geänderte 64×64-Kacheln
 - VNC-Passwort-Authentifizierung
 - Maus mit drei Tasten und Scrollrad; Retina/HiDPI wird umgerechnet
-- Tastatur: Zeichen werden als Text eingefügt und kommen dadurch unabhängig vom Tastaturlayout an (`@`, `€`, Umlaute). Shortcuts mit Strg/Cmd lösen echte Tasten aus.
+- Tastatur: Zeichen werden als Text eingefügt und kommen dadurch unabhängig vom Tastaturlayout an (`@`, `€`, Umlaute). Shortcuts mit Strg/Cmd lösen echte Tasten aus; Strg und Cmd werden zwischen Mac und Windows automatisch zugeordnet, Strg+Alt+Entf per Knopf.
 - Zwischenablage für Text in beide Richtungen (Latin-1, wie im Standard)
 - Dateiübertragung zwischen Desktop-Viewer und VNC-Beach-Server: lokale Dateien ins VNC-Fenster ziehen, Serverdateien über „Dateien“ herunterladen
 - Auflösungswechsel während der Sitzung (DesktopSize)
@@ -31,11 +31,14 @@ Erste lauffähige Version (0.1). Umgesetzt:
 - Viewer mit Verbindungsdialog; das Fenster passt sich an den entfernten Bildschirm an
 - Favoriten im Viewer: mehrere Rechner mit Name, Adresse und Passwort speichern, bearbeiten und per Doppelklick verbinden
 - Einstellungen pro Verbindung (Farbtiefe, Nur ansehen, Darstellung, Zwischenablage, Vollbild, Fenstergröße) mit Standardwerten, die jeder Favorit einzeln überschreibt
-- Windows: Server im selben Programm als Hintergrunddienst mit Symbol im Infobereich, Autostart beim Anmelden und Status im Viewer
+- Server im selben Programm als Hintergrunddienst mit Symbol im Infobereich bzw. in der Menüleiste, Autostart beim Anmelden und Status im Viewer (Windows und macOS)
+- Vor der Anmeldung erreichbar: Windows-Dienst (auch Sperrbildschirm und UAC), LaunchAgent am macOS-Anmeldefenster, Servermodus für den unbeaufsichtigten Mac
+- Windows ohne eingeschaltete Monitore: automatischer virtueller Bildschirm mit 2560 × 1440 (mit Treiber)
+- Erreichbarkeit: alternative Adressen, SSH-Anmeldung (auch FileVault-Entsperrung), Wake-on-LAN über ein Zugangsgerät
+- Selbst-Update aus den GitHub-Releases (macOS und Windows)
+- iPad- und iPhone-App als Viewer, derzeit in der Testphase über TestFlight
 
-Auf macOS geprüft sind Verbindung, Passwort (richtig und falsch), Bildübertragung samt Farben, Mausposition und der Viewer gegen den Server. Tastatur, Zwischenablage und Auflösungswechsel sind geschrieben, aber noch nicht von Hand durchgetestet.
-
-Auf Windows 11 geprüft: Build und Tests, der Viewer verbindet sich über Tailscale mit dem Mac, und der Server liefert den Windows-Bildschirm aus (2560×1440). Maus- und Tastatureingaben unter Windows (`SendInput`) sind noch nicht getestet.
+Geprüft auf macOS und Windows 11 in beiden Richtungen: Verbindung, Passwort, Bild, Maus, Tastatur, Zwischenablage, Dateiübertragung, Auflösungswechsel, mehrere Bildschirme, Windows-Dienst vor der Anmeldung und der virtuelle Bildschirm ohne Monitore. Nicht praktisch geprüft sind das macOS-Anmeldefenster, der FileVault-Neustart und der Servermodus des Macs nach einem echten Stromausfall.
 
 ## Aufbau
 
@@ -43,7 +46,10 @@ Auf Windows 11 geprüft: Build und Tests, der Viewer verbindet sich über Tailsc
 | --- | --- |
 | `crates/rfb` | Protokoll: Handshake, VNC-Auth, Nachrichten, Pixelformate, ZRLE |
 | `crates/beach-server` | Server: Bildschirmaufnahme (`xcap`), Eingaben (`enigo`), Zwischenablage (`arboard`) |
-| `crates/beach-viewer` | Viewer: Fenster und Eingaben (`eframe`/`egui`) |
+| `crates/beach-viewer` | Viewer: Fenster und Eingaben (`eframe`/`egui`), Hintergrunddienst, Windows-Dienst, Updates |
+| `crates/beach-access` | Erreichbarkeit: SSH-Anmeldung, Wake-on-LAN, alternative Adressen |
+| `crates/beach-mobile` | Client als C-Bibliothek für die iOS-App |
+| `apps/ios` | iPad- und iPhone-App (SwiftUI) |
 
 ## Nutzung
 
@@ -257,13 +263,12 @@ Klassisches VNC verschlüsselt den Bildschirminhalt nicht, und die VNC-Passwort-
 
 ## Roadmap
 
-1. Auf echtem Windows testen (Server und Viewer, HiDPI, mehrere Monitore mit unterschiedlicher Skalierung)
+1. iPad- und iPhone-App aus der Testphase in den App Store bringen
 2. Verschlüsselung (VeNCrypt/TLS) und ein stärkeres Passwortverfahren
 3. Schnellere Aufnahme: ScreenCaptureKit (macOS) und DXGI-Streaming (Windows) statt Einzelbildern
 4. Mauszeiger übertragen (Cursor-Pseudo-Encoding)
-5. Viewer: Cmd↔Strg-Zuordnung bei Mac → Windows
-6. Unicode-Zwischenablage (Extended Clipboard)
-7. Notarisierte macOS-App (Developer ID) und signierte Windows-Exe für Downloads im Browser
+5. Unicode-Zwischenablage (Extended Clipboard)
+6. Notarisierte macOS-App (Developer ID) und signierte Windows-Exe für Downloads im Browser
 
 ## Mac als Server: eingebaute Bildschirmfreigabe oder VNC Beach
 

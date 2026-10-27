@@ -192,6 +192,11 @@
   .cols.three, .steps.three { grid-template-columns: 1fr 1fr 1fr; }
   .platforms { margin-bottom: 44px; }
   .platforms .card .who { color: #FFD35C; font-weight: 700; }
+  .soon {
+    display: inline-block; margin-left: 8px; padding: 2px 10px; border-radius: 999px;
+    background: var(--red); color: #fff; font-family: var(--display); font-size: 12px;
+    font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; vertical-align: middle;
+  }
   .card {
     background: rgba(255,255,255,0.08);
     border: 1px solid rgba(255,255,255,0.18);
@@ -274,9 +279,9 @@
     </nav>
     <div class="hero">
       <div>
-        <span class="eyebrow">Kostenlos · Open Source · macOS, Windows &amp; iPad</span>
+        <span class="eyebrow">Kostenlos · Open Source · macOS &amp; Windows · iPad bald</span>
         <h1>Bildschirm teilen, ganz <em>entspannt.</em></h1>
-        <p class="lead">VNC Beach ist ein VNC-Server und -Viewer für macOS und Windows, dazu eine Viewer-App für iPad und iPhone. Alles spricht das ganz normale VNC-Protokoll, kostet nichts und wird nichts kosten.</p>
+        <p class="lead">VNC Beach ist ein VNC-Server und -Viewer für macOS und Windows. Eine Viewer-App für iPad und iPhone ist in der Testphase. Alles spricht das ganz normale VNC-Protokoll, kostet nichts und wird nichts kosten.</p>
         <div class="cta">
           <a class="btn primary" href="https://github.com/realS3BI/vnc-beach/releases">Herunterladen</a>
           <a class="btn ghost" href="#loslegen">So geht's</a>
@@ -315,7 +320,7 @@
 <section class="sea" id="plattformen">
   <div class="wrap">
     <h2>Für welche Geräte</h2>
-    <p class="intro">Mac und Windows-PC können beides: zuschauen und den eigenen Bildschirm teilen. iPad und iPhone schauen zu.</p>
+    <p class="intro">Mac und Windows-PC können beides: zuschauen und den eigenen Bildschirm teilen. iPad und iPhone schauen zu, sobald die App fertig ist.</p>
     <div class="cols three platforms">
       <div class="card">
         <h3>macOS</h3>
@@ -336,12 +341,13 @@
         </ul>
       </div>
       <div class="card">
-        <h3>iPad und iPhone</h3>
-        <div class="who">Nur Viewer</div>
+        <h3>iPad und iPhone <span class="soon">Bald</span></h3>
+        <div class="who">Nur Viewer · in der Testphase</div>
         <ul>
+          <li>Noch nicht öffentlich: Die App wird gerade über TestFlight getestet. Sobald sie fertig ist, steht sie hier.</li>
           <li>Verbindet sich mit jedem VNC-Server, hat aber keinen eigenen: Ein iPad lässt sich damit nicht fernsteuern.</li>
           <li>Finger, Apple Pencil, Trackpad und Hardware-Tastatur; ⌘ wird zu Strg; Umschalten zwischen den Bildschirmen des Servers.</li>
-          <li>Favoriten mit Passwörtern im Schlüsselbund, Bonjour-Suche im WLAN, <code>vncbeach://name</code> für Kurzbefehle. Verteilung per TestFlight.</li>
+          <li>Favoriten mit Passwörtern im Schlüsselbund, Bonjour-Suche im WLAN, <code>vncbeach://name</code> für Kurzbefehle.</li>
         </ul>
       </div>
     </div>
@@ -350,7 +356,7 @@
     <div class="cols">
       <div class="card">
         <h3>Viewer</h3>
-        <div class="who">macOS, Windows, iPad und iPhone</div>
+        <div class="who">macOS und Windows, bald iPad und iPhone</div>
         <ul>
           <li><strong>Favoriten</strong> mit Name, Adresse und Passwort. Doppelklick verbindet.</li>
           <li><strong>Einstellungen pro Verbindung:</strong> Farbtiefe bis 256 Farben für langsame Leitungen, Nur ansehen, Originalgröße oder ans Fenster angepasst, Vollbild beim Verbinden. Alles mit Standardwerten, die jeder Favorit einzeln überschreiben kann.</li>
@@ -409,12 +415,9 @@
         </ol>
       </div>
       <div class="os">
-        <h3>Auf iPad und iPhone</h3>
-        <ol>
-          <li>Die App über TestFlight installieren (iOS 18 oder neuer); den Quellcode gibt es unter <code>apps/ios</code>.</li>
-          <li>Favorit anlegen: Name, Adresse (über Tailscale reicht der Gerätename) und Passwort.</li>
-          <li>Tippen verbindet. Die Zusatzleiste bringt Esc, Strg, Alt, Win, Pfeile und Strg+Alt+Entf.</li>
-        </ol>
+        <h3>Auf iPad und iPhone <span class="soon">Bald</span></h3>
+        <p>Die App ist noch in der Testphase und nicht öffentlich erhältlich. Wer selbst bauen will, findet sie im Repository unter <code>apps/ios</code> (iOS 18 oder neuer, Xcode nötig).</p>
+        <p>Geplant: Favorit anlegen, tippen, verbunden. Finger, Apple Pencil, Trackpad und Hardware-Tastatur, dazu eine Zusatzleiste mit Esc, Strg, Alt, Win, Pfeilen und Strg+Alt+Entf.</p>
       </div>
     </div>
     <div class="note" id="ohne-monitor">
