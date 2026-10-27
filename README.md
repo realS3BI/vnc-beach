@@ -6,6 +6,16 @@ Ein VNC-Server und -Viewer, der einfach funktioniert: auf macOS und Windows, gra
 
 Server und Viewer sprechen Standard-VNC (RFB 3.8, RFC 6143). Der VNC-Beach-Viewer verbindet sich deshalb auch mit anderen VNC-Servern (TigerVNC, RealVNC, macOS-Bildschirmfreigabe mit VNC-Passwort). Umgekehrt können sich TigerVNC, RealVNC Viewer & Co. mit dem VNC-Beach-Server verbinden.
 
+## Plattformen
+
+| Gerät | Viewer | Server | Besonderheiten |
+| --- | --- | --- | --- |
+| macOS | ja | ja | Eine App; Symbol in der Menüleiste; auf Wunsch schon am Anmeldefenster erreichbar. Braucht Bildschirmaufnahme und Bedienungshilfen. Alternativ die eingebaute Bildschirmfreigabe als Server (ohne Zwischenablage). |
+| Windows (64-Bit, 10/11) | ja | ja | Eine Datei; Symbol im Infobereich; als Windows-Dienst auch im Sperr- und Anmeldebildschirm erreichbar. **Ohne eingeschaltete Monitore** braucht es einmalig den virtuellen Bildschirmtreiber `usbmmidd_v2` von Amyuni, siehe [Ohne eingeschaltete Monitore](#ohne-eingeschaltete-monitore-windows). |
+| iPad und iPhone (iOS 18+) | ja | nein | Nur Viewer: verbindet sich mit jedem VNC-Server, teilt aber keinen eigenen Bildschirm. Verteilung per TestFlight, siehe [iPad und iPhone](#ipad-und-iphone). |
+
+Der Betrieb ohne Monitor ist nur auf Windows ein Thema. Auf dem Mac gibt es die Funktion nicht und sie wurde dort auch nicht gebraucht: Ein Mac ohne angeschlossenen Monitor behält einen Bildschirm in Standardauflösung, den VNC Beach oder die Bildschirmfreigabe übertragen. Wer dort eine bestimmte Auflösung braucht, nimmt einen HDMI-Dummy-Stecker. Die iOS-App hat keinen Server und ist davon nicht betroffen.
+
 ## Stand
 
 Erste lauffähige Version (0.1). Umgesetzt:
@@ -201,7 +211,7 @@ Die Einrichtung startet den Mac nicht neu. Ein kontrollierter Neustarttest muss 
 
 #### Ohne eingeschaltete Monitore (Windows)
 
-Melden sich alle Monitore beim Ausschalten von Windows ab, zeigt Windows nur noch einen kleinen Ersatzbildschirm (oft 1024 × 768). Mit dem virtuellen Bildschirmtreiber „usbmmidd_v2“ von Amyuni Technologies stellt VNC Beach dann automatisch genau einen Bildschirm mit 2560 × 1440 bereit. Sobald ein echter Monitor zurück ist, entfernt VNC Beach ihn wieder, auch während einer Sitzung und im Windows-Dienst. Den Treiber richtet *Dieser Computer → Einstellungen → Virtueller Bildschirm → Treiber einrichten* einmalig mit Administratorrechten ein (oder `vnc-beach.exe --install-display-driver`). Er wird beim Hersteller geladen und steht unter dessen Lizenz. Details, Grenzen und Tests: [`docs/headless-windows.md`](docs/headless-windows.md).
+Nur Windows; Mac und iOS-App sind nicht betroffen, siehe [Plattformen](#plattformen). Melden sich alle Monitore beim Ausschalten von Windows ab, zeigt Windows nur noch einen kleinen Ersatzbildschirm (oft 1024 × 768). Mit dem virtuellen Bildschirmtreiber „usbmmidd_v2“ von Amyuni Technologies stellt VNC Beach dann automatisch genau einen Bildschirm mit 2560 × 1440 bereit. Sobald ein echter Monitor zurück ist, entfernt VNC Beach ihn wieder, auch während einer Sitzung und im Windows-Dienst. Den Treiber richtet *Dieser Computer → Einstellungen → Virtueller Bildschirm → Treiber einrichten* einmalig mit Administratorrechten ein (oder `vnc-beach.exe --install-display-driver`). Er wird beim Hersteller geladen und steht unter dessen Lizenz. Details, Grenzen und Tests: [`docs/headless-windows.md`](docs/headless-windows.md).
 
 Für „Rechner einschalten und aus der Ferne drauf“ braucht es zusätzlich:
 

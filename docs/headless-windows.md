@@ -1,5 +1,7 @@
 # Windows ohne eingeschaltete Monitore
 
+**Gilt nur für den Windows-Server.** Der macOS-Server hat diese Funktion nicht und braucht sie nach bisherigem Stand nicht: Ein Mac ohne angeschlossenen Monitor behält einen Bildschirm in Standardauflösung; für eine bestimmte Auflösung hilft dort ein HDMI-Dummy-Stecker. Die iPad-/iPhone-App ist nur ein Viewer ohne eigenen Server.
+
 Manche Monitore melden sich beim Ausschalten vollständig von Windows ab. Windows zeigt dann nur noch einen Ersatzbildschirm mit niedriger Auflösung (oft 1024 × 768), und genau den überträgt VNC Beach. Ein größeres Viewer-Fenster ändert daran nichts.
 
 Mit dem virtuellen Bildschirmtreiber „usbmmidd_v2“ von Amyuni Technologies stellt VNC Beach in diesem Fall selbst einen Bildschirm bereit:
