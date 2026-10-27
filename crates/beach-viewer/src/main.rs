@@ -14,6 +14,8 @@ mod control;
 mod display_driver;
 mod files;
 mod icon;
+#[cfg(windows)]
+mod install;
 mod keys;
 #[cfg(target_os = "macos")]
 mod mac_server;
@@ -63,6 +65,9 @@ struct Args {
     /// Root for file transfers (service agent).
     #[arg(long, hide = true)]
     home: Option<std::path::PathBuf>,
+    /// The download the installed copy was started from; it is deleted.
+    #[arg(long, hide = true)]
+    installed_from: Option<std::path::PathBuf>,
 }
 
 /// Dispatches to the service/setup modes, the tray process or the viewer
@@ -87,6 +92,16 @@ fn main() {
                 1
             }
         });
+    }
+    // A downloaded exe installs itself and hands over to the installed copy.
+    #[cfg(windows)]
+    {
+        if install::relocate() {
+            return;
+        }
+        if let Some(download) = &args.installed_from {
+            install::remove_download(download);
+        }
     }
     if args.background {
         if let Err(e) = background::run() {

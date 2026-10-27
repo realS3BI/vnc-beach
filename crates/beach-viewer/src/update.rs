@@ -183,7 +183,7 @@ fn is_translocated(exe: &Path) -> bool {
 }
 
 /// Stops a running background process; returns true if there was one.
-fn stop_background() -> bool {
+pub(crate) fn stop_background() -> bool {
     if control::call_at(Endpoint::Tray, ControlCommand::Status).is_none() {
         return false;
     }

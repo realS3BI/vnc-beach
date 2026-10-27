@@ -11,8 +11,16 @@ echo "== sync source to $HOST"
 COPYFILE_DISABLE=1 tar --exclude ./target --exclude ./.git --exclude ./apps/ios/DerivedData -cf - . \
   | ssh "$HOST" 'tar -xf - -C %LOCALAPPDATA%\vnc-beach\src'
 echo "== build on $HOST"
-ssh "$HOST" '%LOCALAPPDATA%\vnc-beach\cargo.cmd build --release -p beach-viewer 2>&1' \
-  | grep -vE '^\s+(Compiling|Downloading|Downloaded)' || true
+# OpenSSL for ssh2 comes prebuilt from build-deps: the vendored build needs a
+# full Perl, and Git's lacks modules.
+log=$(mktemp)
+if ! ssh "$HOST" 'set OPENSSL_NO_VENDOR=1&& set OPENSSL_STATIC=1&& set OPENSSL_DIR=%LOCALAPPDATA%\vnc-beach\build-deps\openssl-3.6.3&& %LOCALAPPDATA%\vnc-beach\cargo.cmd build --release -p beach-viewer 2>&1' >"$log"; then
+  grep -vE '^\s+(Compiling|Downloading|Downloaded)' "$log" >&2
+  echo "Windows build failed" >&2
+  exit 1
+fi
+grep -vE '^\s+(Compiling|Downloading|Downloaded)' "$log" || true
+rm -f "$log"
 echo "== fetch"
 rm -f "$OUT/VNC-Beach-Windows.exe"
 # ${HOST} in braces: zsh would read "$HOST:A..." as a path modifier.

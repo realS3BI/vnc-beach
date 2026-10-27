@@ -11,7 +11,7 @@ Server und Viewer sprechen Standard-VNC (RFB 3.8, RFC 6143). Der VNC-Beach-Viewe
 | Gerät | Viewer | Server | Besonderheiten |
 | --- | --- | --- | --- |
 | macOS | ja | ja | Eine App; Symbol in der Menüleiste; auf Wunsch schon am Anmeldefenster erreichbar. Braucht Bildschirmaufnahme und Bedienungshilfen. Alternativ die eingebaute Bildschirmfreigabe als Server (ohne Zwischenablage). |
-| Windows (64-Bit, 10/11) | ja | ja | Eine Datei; Symbol im Infobereich; als Windows-Dienst auch im Sperr- und Anmeldebildschirm erreichbar. **Ohne eingeschaltete Monitore** braucht es einmalig den virtuellen Bildschirmtreiber `usbmmidd_v2` von Amyuni, siehe [Ohne eingeschaltete Monitore](#ohne-eingeschaltete-monitore-windows). |
+| Windows (64-Bit, 10/11) | ja | ja | Eine Datei, die sich beim ersten Start selbst einrichtet (Startmenü „VNC Beach“); Symbol im Infobereich; als Windows-Dienst auch im Sperr- und Anmeldebildschirm erreichbar. **Ohne eingeschaltete Monitore** braucht es einmalig den virtuellen Bildschirmtreiber `usbmmidd_v2` von Amyuni, siehe [Ohne eingeschaltete Monitore](#ohne-eingeschaltete-monitore-windows). |
 | iPad und iPhone (iOS 18+) | ja | nein | Nur Viewer: verbindet sich mit jedem VNC-Server, teilt aber keinen eigenen Bildschirm. Derzeit in der Testphase über TestFlight, noch nicht öffentlich, siehe [iPad und iPhone](#ipad-und-iphone). |
 
 Der Betrieb ohne Monitor ist nur auf Windows ein Thema. Auf dem Mac gibt es die Funktion nicht und sie wurde dort auch nicht gebraucht: Ein Mac ohne angeschlossenen Monitor behält einen Bildschirm in Standardauflösung, den VNC Beach oder die Bildschirmfreigabe übertragen. Wer dort eine bestimmte Auflösung braucht, nimmt einen HDMI-Dummy-Stecker. Die iOS-App hat keinen Server und ist davon nicht betroffen.
@@ -36,6 +36,7 @@ Version 0.2.5. Umgesetzt:
 - Windows ohne eingeschaltete Monitore: automatischer virtueller Bildschirm mit 2560 × 1440 (mit Treiber)
 - Erreichbarkeit: alternative Adressen, SSH-Anmeldung (auch FileVault-Entsperrung), Wake-on-LAN über ein Zugangsgerät
 - Selbst-Update aus den GitHub-Releases (macOS und Windows)
+- Windows: Die heruntergeladene `VNC-Beach-Windows.exe` kopiert sich beim ersten Start nach `%LOCALAPPDATA%\Programs\vnc-beach\vnc-beach.exe`, legt im Startmenü „VNC Beach“ an und löscht den Download. Eine ältere Datei überschreibt keine neuere Installation.
 - iPad- und iPhone-App als Viewer, derzeit in der Testphase über TestFlight
 
 Geprüft auf macOS und Windows 11 in beiden Richtungen: Verbindung, Passwort, Bild, Maus, Tastatur, Zwischenablage, Dateiübertragung, Auflösungswechsel, mehrere Bildschirme, Windows-Dienst vor der Anmeldung und der virtuelle Bildschirm ohne Monitore. Nicht praktisch geprüft sind das macOS-Anmeldefenster, der FileVault-Neustart und der Servermodus des Macs nach einem echten Stromausfall.
