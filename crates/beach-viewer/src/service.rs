@@ -118,7 +118,7 @@ pub fn request_uninstall() -> Result<(), SetupError> {
 #[cfg(windows)]
 pub use platform::{install, request_display_driver, run_service, uninstall};
 #[cfg(target_os = "macos")]
-pub use platform::{install, uninstall};
+pub use platform::{install, on_console, uninstall};
 
 /// Log file of the service, the agent or the setup: `%ProgramData%\VNC
 /// Beach` on Windows, `/Library/Logs/VNC Beach` on macOS (these run as
@@ -240,6 +240,41 @@ mod platform {
 
     pub fn installed() -> bool {
         plist_path().exists()
+    }
+
+    /// Whether this process's GUI session is the one on the screen
+    /// (`kCGSSessionOnConsoleKey`). True when that can't be read.
+    pub fn on_console() -> bool {
+        use std::ffi::{c_char, c_void};
+        type CFTypeRef = *const c_void;
+        const UTF8: u32 = 0x0800_0100;
+        #[link(name = "CoreGraphics", kind = "framework")]
+        extern "C" {
+            fn CGSessionCopyCurrentDictionary() -> CFTypeRef;
+        }
+        #[link(name = "CoreFoundation", kind = "framework")]
+        extern "C" {
+            fn CFStringCreateWithCString(alloc: CFTypeRef, text: *const c_char, encoding: u32) -> CFTypeRef;
+            fn CFDictionaryGetValue(dict: CFTypeRef, key: CFTypeRef) -> CFTypeRef;
+            fn CFBooleanGetValue(boolean: CFTypeRef) -> u8;
+            fn CFRelease(object: CFTypeRef);
+        }
+        // SAFETY: Create/Copy results are released once; the value is owned
+        // by the dictionary and read before the dictionary is released.
+        unsafe {
+            let dict = CGSessionCopyCurrentDictionary();
+            if dict.is_null() {
+                return true;
+            }
+            let key = CFStringCreateWithCString(std::ptr::null(), c"kCGSSessionOnConsoleKey".as_ptr(), UTF8);
+            let value = if key.is_null() { std::ptr::null() } else { CFDictionaryGetValue(dict, key) };
+            let on = value.is_null() || CFBooleanGetValue(value) != 0;
+            if !key.is_null() {
+                CFRelease(key);
+            }
+            CFRelease(dict);
+            on
+        }
     }
 
     /// The executable of an installed app bundle. `None` for builds run from

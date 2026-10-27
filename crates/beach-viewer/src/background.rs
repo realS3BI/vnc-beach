@@ -38,6 +38,20 @@ pub fn run() -> anyhow::Result<()> {
         let (state, quit) = (state.clone(), quit.clone());
         move |cmd| handle(&state, &quit, cmd)
     })?;
+    // The port may be busy for a moment, e.g. while the login window agent
+    // hands it over: keep trying like the agent does.
+    std::thread::Builder::new().name("retry".into()).spawn({
+        let (state, quit) = (state.clone(), quit.clone());
+        move || {
+            while !quit.load(Ordering::Acquire) {
+                std::thread::sleep(Duration::from_secs(5));
+                let mut st = state.lock().unwrap();
+                if st.error.is_some() && !st.delegated() {
+                    st.apply();
+                }
+            }
+        }
+    })?;
     // May wait on the administrator prompt; once the Windows service runs,
     // the tray hands the server over to it.
     std::thread::Builder::new().name("service-setup".into()).spawn({
@@ -301,6 +315,20 @@ impl State {
 
     /// Starts, stops or restarts the server so it matches the config.
     fn apply(&mut self) {
+        // Screen Sharing opens login window sessions of its own next to the
+        // signed-in user's; launchd starts the agent there too. Serving from
+        // such a session would take the port from the tray process and show
+        // a login screen nobody looks at.
+        #[cfg(target_os = "macos")]
+        if self.role == Role::Agent && !service::on_console() {
+            if let Some(server) = self.server.take() {
+                log::info!("login window session left the console, stopping the server");
+                server.stop();
+            }
+            self.running = None;
+            self.error = Some("Diese Anmeldesitzung ist nicht am Bildschirm.".into());
+            return;
+        }
         if self.delegated() {
             if let Some(server) = self.server.take() {
                 server.stop();
