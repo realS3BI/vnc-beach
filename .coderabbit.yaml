@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+reviews:
+  tools:
+    # CodeRabbit runs Clippy on Linux, where xcap, enigo, tray-icon and arboard
+    # need system libraries its sandbox lacks. VNC Beach targets macOS and
+    # Windows only; run `cargo clippy --workspace` locally instead.
+    clippy:
+      enabled: false

@@ -15,6 +15,8 @@ use rfb::messages::{read_screens, ClientMessage, Rect, ServerMessage};
 use rfb::zrle::ZrleDecoder;
 use rfb::PixelFormat;
 
+/// Connects, requests the size pseudo-encodings and prints every change
+/// until the time limit (default 600 s) runs out.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     let (addr, password, seconds) = match &args[1..] {

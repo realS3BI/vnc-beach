@@ -65,6 +65,8 @@ struct Args {
     home: Option<std::path::PathBuf>,
 }
 
+/// Dispatches to the service/setup modes, the tray process or the viewer
+/// window, depending on the command line.
 fn main() {
     let args = Args::parse();
     init_logging(&args);
@@ -135,6 +137,8 @@ fn init_logging(args: &Args) {
     builder.init();
 }
 
+/// Runs one of the setup or service modes (`--service`, `--install-service`,
+/// `--install-display-driver`, ...); `main` exits with its result.
 #[cfg(any(windows, target_os = "macos"))]
 fn run_service_mode(args: &Args) -> anyhow::Result<()> {
     use anyhow::Context as _;
@@ -168,6 +172,7 @@ fn run_service_mode(args: &Args) -> anyhow::Result<()> {
     }
 }
 
+/// The service modes don't exist on other platforms.
 #[cfg(not(any(windows, target_os = "macos")))]
 fn run_service_mode(_args: &Args) -> anyhow::Result<()> {
     anyhow::bail!("the service is only available on Windows and macOS")
