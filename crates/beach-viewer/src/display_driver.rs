@@ -140,6 +140,7 @@ fn check_signature(file: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `name` in the Windows `System32` directory.
 fn system32(name: &str) -> PathBuf {
     let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
     PathBuf::from(root).join("System32").join(name)
@@ -164,6 +165,7 @@ fn run(cmd: &mut Command) -> anyhow::Result<String> {
     Ok(stdout)
 }
 
+/// Lowercase hex digits of `bytes`, for comparing SHA-256 sums.
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }

@@ -45,18 +45,23 @@ pub struct VirtualDisplay {
 
 /// What [`Fallback`] needs from the system.
 pub trait Driver {
+    /// The active displays, split into the driver's and everyone else's.
     fn displays(&mut self) -> anyhow::Result<Displays>;
     /// Adds one virtual display.
     fn add(&mut self) -> anyhow::Result<()>;
     /// Removes one virtual display (the driver picks which).
     fn remove(&mut self) -> anyhow::Result<()>;
+    /// Sets the resolution of the display `device` (a GDI device name).
     fn set_mode(&mut self, device: &str, width: u32, height: u32) -> anyhow::Result<()>;
     /// Whether VNC Beach added the driver's current display; survives restarts.
     fn owned(&self) -> bool;
+    /// Records whether VNC Beach owns the driver's current display.
     fn set_owned(&mut self, owned: bool);
+    /// The current time; tests substitute a fake clock.
     fn now(&self) -> Instant {
         Instant::now()
     }
+    /// Waits for `duration`; tests advance the fake clock instead.
     fn sleep(&mut self, duration: Duration) {
         std::thread::sleep(duration);
     }
@@ -73,6 +78,7 @@ pub struct Fallback<D> {
 }
 
 impl<D: Driver> Fallback<D> {
+    /// A fallback over `driver` that hasn't failed yet.
     pub fn new(driver: D) -> Self {
         Fallback {
             driver,
@@ -99,6 +105,10 @@ impl<D: Driver> Fallback<D> {
         }
     }
 
+    /// One decision without the error pause of [`Fallback::tick`]: removes
+    /// an owned display once a monitor is back, adds one while nothing is
+    /// active and keeps the resolution of the owned one. True if it changed
+    /// the displays.
     fn step(&mut self) -> anyhow::Result<bool> {
         let displays = self.driver.displays()?;
         let owned = self.driver.owned();
@@ -147,6 +157,8 @@ impl<D: Driver> Fallback<D> {
         }
     }
 
+    /// Adds a virtual display, waits up to [`APPEAR_TIMEOUT`] for it to
+    /// become active and sets its resolution.
     fn add(&mut self) -> anyhow::Result<bool> {
         // Mark first: if the process dies right after adding, the next one
         // still knows the display is ours.
@@ -222,6 +234,7 @@ impl<D: Driver> Fallback<D> {
         }
     }
 
+    /// The driver, for assertions in tests.
     #[cfg(test)]
     fn driver(&self) -> &D {
         &self.driver
@@ -275,6 +288,8 @@ mod windows {
     }
 
     impl Amyuni {
+        /// The driver, with ownership read from the marker file in
+        /// `%ProgramData%\VNC Beach`.
         pub fn new() -> Amyuni {
             let marker = std::env::var_os("ProgramData")
                 .map(|dir| PathBuf::from(dir).join("VNC Beach").join("virtual-display"));
@@ -284,12 +299,15 @@ mod windows {
     }
 
     impl Default for Amyuni {
+        /// Same as [`Amyuni::new`].
         fn default() -> Self {
             Self::new()
         }
     }
 
     impl Driver for Amyuni {
+        /// Counts active monitors per adapter through `EnumDisplayDevicesW`;
+        /// the driver's own adapters become [`VirtualDisplay`]s.
         fn displays(&mut self) -> anyhow::Result<Displays> {
             let mut displays = Displays::default();
             let adapters = devices(None);
@@ -327,14 +345,18 @@ mod windows {
             Ok(displays)
         }
 
+        /// Asks the driver for one more display.
         fn add(&mut self) -> anyhow::Result<()> {
             control(ADD)
         }
 
+        /// Asks the driver to drop one of its displays.
         fn remove(&mut self) -> anyhow::Result<()> {
             control(REMOVE)
         }
 
+        /// Changes the resolution through `ChangeDisplaySettingsExW` and
+        /// stores it in the registry.
         fn set_mode(&mut self, device: &str, width: u32, height: u32) -> anyhow::Result<()> {
             let name: Vec<u16> = device.encode_utf16().chain(Some(0)).collect();
             // SAFETY: `name` is NUL-terminated and `dm` sized; both outlive the calls.
@@ -361,10 +383,12 @@ mod windows {
             Ok(())
         }
 
+        /// Whether the marker file existed at start or was written since.
         fn owned(&self) -> bool {
             self.owned
         }
 
+        /// Creates or deletes the marker file; failures are only logged.
         fn set_owned(&mut self, owned: bool) {
             if owned == self.owned {
                 return;
@@ -420,6 +444,7 @@ mod windows {
         }
     }
 
+    /// A NUL-terminated UTF-16 buffer as a string.
     fn wstr(text: &[u16]) -> String {
         let len = text.iter().position(|&c| c == 0).unwrap_or(text.len());
         String::from_utf16_lossy(&text[..len])
@@ -634,6 +659,7 @@ mod tests {
     }
 
     impl Fake {
+        /// A system with `others` monitors and no virtual display.
         fn new(others: usize) -> Fake {
             Fake {
                 others,
@@ -652,6 +678,7 @@ mod tests {
             }
         }
 
+        /// A driver display with a fresh device name.
         fn virtual_display(&mut self, (width, height): (u32, u32)) -> VirtualDisplay {
             self.next_id += 1;
             VirtualDisplay {
@@ -661,12 +688,14 @@ mod tests {
             }
         }
 
+        /// Moves the fake clock forward.
         fn advance(&mut self, d: Duration) {
             self.clock += d;
         }
     }
 
     impl Driver for Fake {
+        /// Activates the added displays whose delay has passed.
         fn displays(&mut self) -> anyhow::Result<Displays> {
             let now = self.clock;
             let (ready, waiting) = self.pending.drain(..).partition(|(_, at)| *at <= now);
@@ -678,6 +707,8 @@ mod tests {
             })
         }
 
+        /// Queues a display that appears after `appear_after`, or fails if
+        /// `fail_add` is set.
         fn add(&mut self) -> anyhow::Result<()> {
             if self.fail_add {
                 bail!("the virtual display driver is not installed");
@@ -688,12 +719,14 @@ mod tests {
             Ok(())
         }
 
+        /// Drops the newest display, like the real driver.
         fn remove(&mut self) -> anyhow::Result<()> {
             self.removed += 1;
             self.virtuals.pop();
             Ok(())
         }
 
+        /// Applies `mode_result` if set, otherwise the requested size.
         fn set_mode(&mut self, device: &str, width: u32, height: u32) -> anyhow::Result<()> {
             self.mode_sets += 1;
             let (w, h) = self.mode_result.unwrap_or((width, height));
@@ -703,27 +736,33 @@ mod tests {
             Ok(())
         }
 
+        /// The in-memory ownership flag.
         fn owned(&self) -> bool {
             self.owned
         }
 
+        /// Sets the in-memory ownership flag.
         fn set_owned(&mut self, owned: bool) {
             self.owned = owned;
         }
 
+        /// The fake clock.
         fn now(&self) -> Instant {
             self.clock
         }
 
+        /// Advances the fake clock instead of waiting.
         fn sleep(&mut self, d: Duration) {
             self.advance(d);
         }
     }
 
+    /// A fallback over `fake`.
     fn fallback(fake: Fake) -> Fallback<Fake> {
         Fallback::new(fake)
     }
 
+    /// Moves the fake clock of `f`'s driver forward.
     fn advance(f: &mut Fallback<Fake>, d: Duration) {
         f.driver.advance(d);
     }

@@ -104,6 +104,7 @@ impl ServerPanel {
         }
     }
 
+    /// Takes the results of background status checks and setup runs.
     fn poll(&mut self) {
         #[cfg(target_os = "macos")]
         {

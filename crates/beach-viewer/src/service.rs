@@ -465,6 +465,7 @@ mod platform {
             .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
     }
 
+    /// The Tailscale CLI in its default install location, if present.
     fn tailscale_exe() -> Option<PathBuf> {
         let exe = PathBuf::from(std::env::var_os("ProgramFiles")?).join("Tailscale\\tailscale.exe");
         exe.exists().then_some(exe)

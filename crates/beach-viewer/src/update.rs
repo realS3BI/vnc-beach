@@ -195,6 +195,7 @@ fn stop_background() -> bool {
     true
 }
 
+/// Downloads `url` to the file `to` with the system `curl`.
 pub(crate) fn download(url: &str, to: &Path) -> Result<(), String> {
     curl(&["-o", &to.to_string_lossy(), url]).map(|_| ())
 }

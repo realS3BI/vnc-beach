@@ -157,6 +157,8 @@ struct Source {
 }
 
 impl Screen {
+    /// Starts the capture thread for `display` at up to `fps` frames per
+    /// second and returns once it has a first frame.
     pub fn start(display: Display, fps: u32) -> anyhow::Result<Arc<Screen>> {
         check_permission();
         // `Monitor` isn't `Send` on Windows, so the capture thread owns it from
@@ -211,10 +213,14 @@ impl Screen {
         self.stopped.store(true, Ordering::Release);
     }
 
+    /// Makes `frame` the latest one for viewers.
     fn publish(&self, frame: Frame) {
         *self.latest.lock().unwrap() = Arc::new(frame);
     }
 
+    /// Body of the capture thread: grabs frames while someone watches,
+    /// follows display changes and reopens the source after failures,
+    /// until [`Screen::stop`].
     fn capture_loop(&self, mut source: Source, display: Display, fps: u32, mut watcher: Watcher) {
         let interval = Duration::from_secs_f64(1.0 / fps as f64);
         let mut failures = 0;
@@ -295,6 +301,7 @@ const WATCH_INTERVAL: Duration = Duration::from_secs(1);
 const START_GRACE: Duration = Duration::from_secs(if cfg!(windows) { 15 } else { 0 });
 
 impl Watcher {
+    /// A watcher whose first look is one interval away.
     fn new() -> Watcher {
         Watcher {
             next: Instant::now() + WATCH_INTERVAL,
