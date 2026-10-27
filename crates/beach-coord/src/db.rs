@@ -321,6 +321,8 @@ impl Db {
     // Organizations
 
     pub fn create_org(&self, name: &str, owner: &str) -> rusqlite::Result<String> {
+        // Rolled back on drop if a step fails.
+        let tx = self.conn.unchecked_transaction()?;
         let id = new_id();
         self.conn.execute(
             "INSERT INTO orgs (id, name, created) VALUES (?1, ?2, ?3)",
@@ -330,6 +332,7 @@ impl Db {
             "INSERT INTO members (org_id, user_id, role) VALUES (?1, ?2, 'owner')",
             params![id, owner],
         )?;
+        tx.commit()?;
         Ok(id)
     }
 
@@ -438,6 +441,7 @@ impl Db {
     /// Adds the user and uses the link up. Members keep a higher role they
     /// already have. Returns the organization ID.
     pub fn accept_invite(&self, token: &str, user_id: &str) -> rusqlite::Result<Option<String>> {
+        let tx = self.conn.unchecked_transaction()?;
         let row: Option<(String, String)> = self
             .conn
             .query_row(
@@ -460,6 +464,7 @@ impl Db {
                 params![org_id, user_id, invited.as_str()],
             )?;
         }
+        tx.commit()?;
         Ok(Some(org_id))
     }
 

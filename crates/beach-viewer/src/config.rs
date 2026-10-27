@@ -149,13 +149,23 @@ fn save_to(config: &Config, path: &Path) -> io::Result<()> {
         String::from("# VNC Beach configuration: default connection settings and the built-in server.\n\n");
     text.push_str(&toml::to_string(config).map_err(io::Error::other)?);
     let tmp = path.with_extension("toml.tmp");
-    fs::write(&tmp, text)?;
-    // Holds the account's session and device tokens.
+    // Holds the account's session and device tokens: private from the start.
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&tmp)?;
+    // `mode` only applies to new files; a leftover tmp file is tightened too.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
-        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))?;
+        file.set_permissions(fs::Permissions::from_mode(0o600))?;
     }
+    std::io::Write::write_all(&mut file, text.as_bytes())?;
+    drop(file);
     fs::rename(&tmp, path)
 }
 

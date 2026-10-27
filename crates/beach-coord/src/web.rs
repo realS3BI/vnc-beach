@@ -134,8 +134,14 @@ fn check_login_cookie(headers: &HeaderMap, state: &str) -> Result<()> {
 
 /// Only local paths, so a crafted link can't send people elsewhere.
 fn safe_next(next: Option<&str>) -> Option<String> {
-    next.filter(|n| n.starts_with('/') && !n.starts_with("//") && !n.contains('\\'))
-        .map(str::to_string)
+    next.filter(|n| {
+        // Browsers drop tabs and newlines from URLs, so "/\t/x" would become "//x".
+        n.starts_with('/')
+            && !n.starts_with("//")
+            && !n.contains('\\')
+            && !n.chars().any(|c| c.is_control() || c.is_whitespace())
+    })
+    .map(str::to_string)
 }
 
 // Sign-in
@@ -220,7 +226,7 @@ async fn login_start(
     Query(q): Query<LoginQuery>,
 ) -> Result<Response> {
     if provider == "dev" && app.dev_login {
-        let state = app.db.lock().unwrap().create_login(&q.login("dev")?)?;
+        let state = app.db().create_login(&q.login("dev")?)?;
         let cookie = set_cookie(&app, LOGIN_COOKIE, &state, 600);
         let body = format!(
             r#"<section class="card narrow"><h1>Testanmeldung</h1>
@@ -240,7 +246,7 @@ async fn login_start(
     let Some(oauth) = app.provider(&provider) else {
         return Err(not_found());
     };
-    let state = app.db.lock().unwrap().create_login(&q.login(&provider)?)?;
+    let state = app.db().create_login(&q.login(&provider)?)?;
     let redirect_uri = format!("{}/auth/{provider}/callback", app.public_url);
     let cookie = set_cookie(&app, LOGIN_COOKIE, &state, 600);
     Ok((
@@ -328,7 +334,7 @@ fn oauth_label(provider: &str) -> &str {
 
 /// Signs the browser in and, for the app, hands it a one-time code.
 fn finish(app: &App, state: &str, provider: Option<&str>, identity: Identity) -> Result<Response> {
-    let db = app.db.lock().unwrap();
+    let db = app.db();
     let login = db
         .take_login(state)?
         .filter(|l| Some(l.provider.as_str()) == provider)
@@ -359,7 +365,7 @@ fn finish(app: &App, state: &str, provider: Option<&str>, identity: Identity) ->
 
 async fn logout(State(app): State<Shared>, headers: HeaderMap) -> Result<Response> {
     if let Some(token) = cookie_token(&headers) {
-        app.db.lock().unwrap().delete_session(&token)?;
+        app.db().delete_session(&token)?;
     }
     Ok((
         [(header::SET_COOKIE, session_cookie(&app, "", 0))],
@@ -371,7 +377,7 @@ async fn logout(State(app): State<Shared>, headers: HeaderMap) -> Result<Respons
 // Overview
 
 async fn home(State(app): State<Shared>, headers: HeaderMap) -> Response {
-    let db = app.db.lock().unwrap();
+    let db = app.db();
     let user = match require_user(&db, &headers, "/") {
         Ok(user) => user,
         Err(redirect) => return *redirect,
@@ -477,7 +483,7 @@ struct NameForm {
 }
 
 async fn create_org(State(app): State<Shared>, headers: HeaderMap, Form(f): Form<NameForm>) -> Response {
-    let db = app.db.lock().unwrap();
+    let db = app.db();
     let user = match require_user(&db, &headers, "/") {
         Ok(user) => user,
         Err(redirect) => return *redirect,
@@ -506,7 +512,7 @@ async fn org_page(State(app): State<Shared>, headers: HeaderMap, Path(id): Path<
 }
 
 fn render_org(app: &App, headers: &HeaderMap, id: &str, new_link: Option<(&str, Role)>) -> Response {
-    let db = app.db.lock().unwrap();
+    let db = app.db();
     let user = match require_user(&db, headers, &format!("/orgs/{id}")) {
         Ok(user) => user,
         Err(redirect) => return *redirect,
@@ -664,7 +670,7 @@ async fn create_invite(
     Form(f): Form<RoleForm>,
 ) -> Response {
     let token = {
-        let db = app.db.lock().unwrap();
+        let db = app.db();
         let user = match require_user(&db, &headers, &format!("/orgs/{id}")) {
             Ok(user) => user,
             Err(redirect) => return *redirect,
@@ -729,7 +735,7 @@ async fn remove_member(
     Path((id, target)): Path<(String, String)>,
 ) -> Response {
     let leaving = {
-        let db = app.db.lock().unwrap();
+        let db = app.db();
         matches!(current_user(&db, &headers), Ok(Some(u)) if u.id == target)
     };
     let response = org_action(&app, &headers, &id, |db, org, user| {
@@ -809,7 +815,7 @@ fn org_action(
     id: &str,
     change: impl FnOnce(&Db, &Org, &User) -> Result<()>,
 ) -> Response {
-    let db = app.db.lock().unwrap();
+    let db = app.db();
     let here = format!("/orgs/{id}");
     let user = match require_user(&db, headers, &here) {
         Ok(user) => user,
@@ -823,7 +829,7 @@ fn org_action(
 }
 
 async fn delete_device(State(app): State<Shared>, headers: HeaderMap, Path(id): Path<String>) -> Response {
-    let db = app.db.lock().unwrap();
+    let db = app.db();
     let user = match require_user(&db, &headers, "/") {
         Ok(user) => user,
         Err(redirect) => return *redirect,
@@ -854,7 +860,7 @@ async fn delete_device(State(app): State<Shared>, headers: HeaderMap, Path(id): 
 // Invitations
 
 async fn invite_page(State(app): State<Shared>, headers: HeaderMap, Path(token): Path<String>) -> Response {
-    let db = app.db.lock().unwrap();
+    let db = app.db();
     let here = format!("/invite/{token}");
     let user = match require_user(&db, &headers, &here) {
         Ok(user) => user,
@@ -892,7 +898,7 @@ async fn invite_page(State(app): State<Shared>, headers: HeaderMap, Path(token):
 }
 
 async fn accept_invite(State(app): State<Shared>, headers: HeaderMap, Path(token): Path<String>) -> Response {
-    let db = app.db.lock().unwrap();
+    let db = app.db();
     let user = match require_user(&db, &headers, &format!("/invite/{token}")) {
         Ok(user) => user,
         Err(redirect) => return *redirect,
@@ -1170,7 +1176,7 @@ mod tests {
         let code = serde_urlencoded::from_str::<Vec<(String, String)>>(&format!("c={code}")).unwrap()[0]
             .1
             .clone();
-        let user = app.db.lock().unwrap().take_app_code(&code, "v").unwrap();
+        let user = app.db().take_app_code(&code, "v").unwrap();
         assert!(user.is_some());
     }
 
@@ -1208,7 +1214,7 @@ mod tests {
         assert!(html.contains("Alice"));
 
         // An admin can't demote the owner, and the last owner can't leave.
-        let alice_id = app.db.lock().unwrap().session_user(&alice).unwrap().unwrap().id;
+        let alice_id = app.db().session_user(&alice).unwrap().unwrap().id;
         let (status, _, _) = send(
             &app,
             post(
@@ -1226,7 +1232,7 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
 
-        let bob_id = app.db.lock().unwrap().session_user(&bob).unwrap().unwrap().id;
+        let bob_id = app.db().session_user(&bob).unwrap().unwrap().id;
         let (status, headers, _) = send(
             &app,
             post(&format!("{org_path}/members/{bob_id}/remove"), Some(&bob), ""),
@@ -1267,5 +1273,7 @@ mod tests {
         assert_eq!(safe_next(Some("//evil.example")), None);
         assert_eq!(safe_next(Some("https://evil.example")), None);
         assert_eq!(safe_next(Some("/\\evil.example")), None);
+        assert_eq!(safe_next(Some("/\t/evil.example")), None);
+        assert_eq!(safe_next(Some("/\n")), None);
     }
 }

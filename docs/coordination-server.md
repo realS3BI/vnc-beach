@@ -18,7 +18,7 @@ Dahinter steht ein kleiner **Koordinationsserver** (`beach-coord`). Er ist Teil 
 └──────────────┘
 ```
 
-- **Gespeichert** werden Konten (Name, GitHub-Login bzw. E-Mail-Adresse und die Konto-ID des Anbieters), Organisationen, Mitgliedschaften und Rollen, Einladungen und Geräte mit ihren zuletzt gemeldeten Adressen. Sitzungs-, Geräte- und Einladungsschlüssel liegen nur als SHA-256-Hash in der Datenbank.
+- **Gespeichert** werden Konten (Name, GitHub-Login bzw. E-Mail-Adresse und die Konto-ID des Anbieters), Anmeldesitzungen (Browser 30 Tage, App ein Jahr), Organisationen, Mitgliedschaften und Rollen, Einladungen (bis sie benutzt oder nach 7 Tagen abgelaufen sind), Geräte mit ihren zuletzt gemeldeten Adressen sowie kurzlebige Anmeldevorgänge (10 Minuten) und App-Anmeldecodes (2 Minuten). Abgelaufenes löscht der Server stündlich. Sitzungs-, Geräte- und Einladungsschlüssel sowie App-Anmeldecodes liegen nur als SHA-256-Hash in der Datenbank.
 - **Nicht** über den Server laufen Bildschirm, Eingaben, Zwischenablage oder Dateien. Die Verbindung geht direkt zum Gerät, der Server muss dafür nicht im Tailnet sein. Er muss aber für alle Geräte erreichbar sein, also in der Regel öffentlich per HTTPS.
 - Ob sich zwei Geräte erreichen, regelt weiter das Netz: dasselbe LAN oder Tailscale. Die Geräte melden ihre Adressen (Tailscale zuerst, dann LAN), der Viewer probiert sie der Reihe nach.
 
@@ -97,7 +97,7 @@ beach.example.com {
 
 ### 4. Sichern
 
-Sichere das Datenverzeichnis, vor allem `ticket-key`. Jedes angemeldete Gerät vertraut genau diesem Schlüssel. Geht er verloren, müssen alle Geräte neu hinzugefügt werden. Wer ihn kopiert, kann Tickets ausstellen. Die Datei ist deshalb nur für den Server-Benutzer lesbar.
+Sichere das Datenverzeichnis, vor allem `ticket-key`. Jedes angemeldete Gerät vertraut genau diesem Schlüssel. Geht er verloren, müssen alle Geräte neu hinzugefügt werden. Wer ihn kopiert, kann Tickets ausstellen. Einen neuen Schlüssel legt der Server auf Linux und macOS nur für seinen eigenen Benutzer lesbar an (`0600`). Bei einem vorhandenen Schlüssel, auf Windows und in Backups prüft der Server die Rechte nicht. Dort musst du selbst dafür sorgen, dass nur der Server-Benutzer das Verzeichnis lesen kann.
 
 ## API
 

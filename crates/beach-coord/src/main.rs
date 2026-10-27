@@ -60,6 +60,13 @@ pub struct App {
 }
 
 impl App {
+    /// The database. A panicking request must not lock everybody out, so a
+    /// poisoned lock is taken over: every change runs in one statement or
+    /// one transaction.
+    pub fn db(&self) -> std::sync::MutexGuard<'_, Db> {
+        self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     pub fn provider(&self, id: &str) -> Option<&Provider> {
         self.providers.iter().find(|p| p.kind.id() == id)
     }
@@ -124,7 +131,7 @@ async fn main() -> anyhow::Result<()> {
         async move {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
-                if let Err(e) = app.db.lock().unwrap().clean_up() {
+                if let Err(e) = app.db().clean_up() {
                     log::warn!("clean-up: {e}");
                 }
             }

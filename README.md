@@ -236,7 +236,7 @@ Die Strg+Alt+Entf-Taste in der Leiste schickt die Kombination an den Server. Auf
 
 Wie bei Tailscale: Einmal anmelden, und der Viewer zeigt unter *Konto* alle deine Geräte und die deiner Organisationen, mit Status und Adressen. Ein Doppelklick verbindet, ohne VNC-Passwort. Organisationsgeräte sehen alle Mitglieder; eingeladen wird per Link, verwaltet im Browser.
 
-Dafür gibt es den Koordinationsserver `beach-coord` in diesem Repository. Jeder kann ihn selbst betreiben (ein Programm oder Docker-Image, SQLite, Anmeldung mit GitHub und/oder Google). Er speichert nur Konten, Organisationen und Geräteliste; der Bildschirm läuft weiter direkt zwischen den Geräten über LAN oder Tailscale. Zugriff gibt ein 60 Sekunden gültiges, signiertes Ticket über einen eigenen RFB-Security-Type. Fremde VNC-Viewer melden sich wie bisher mit dem Passwort an. Einrichtung, Sicherheitsmodell und Grenzen: [`docs/coordination-server.md`](docs/coordination-server.md).
+Dafür gibt es den Koordinationsserver `beach-coord` in diesem Repository. Jeder kann ihn selbst betreiben (ein Programm oder Docker-Image, SQLite, Anmeldung mit GitHub und/oder Google). Er speichert Konten, Anmeldesitzungen, Organisationen, Einladungen und die Geräteliste (vollständig in der Doku unten); der Bildschirm läuft weiter direkt zwischen den Geräten über LAN oder Tailscale. Zugriff gibt ein 60 Sekunden gültiges, signiertes Ticket über einen eigenen RFB-Security-Type. Fremde VNC-Viewer melden sich wie bisher mit dem Passwort an. Einrichtung, Sicherheitsmodell und Grenzen: [`docs/coordination-server.md`](docs/coordination-server.md).
 
 ## Updates
 

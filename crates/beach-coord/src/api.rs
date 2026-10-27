@@ -83,7 +83,7 @@ async fn info(State(app): State<Shared>) -> Json<Info> {
 }
 
 async fn token(State(app): State<Shared>, Json(req): Json<TokenRequest>) -> Result<Json<TokenResponse>> {
-    let db = app.db.lock().unwrap();
+    let db = app.db();
     let user_id = db
         .take_app_code(&req.code, &req.verifier)?
         .ok_or_else(|| Error::bad("invalid or expired sign-in code"))?;
@@ -93,7 +93,7 @@ async fn token(State(app): State<Shared>, Json(req): Json<TokenRequest>) -> Resu
 }
 
 async fn logout(State(app): State<Shared>, headers: HeaderMap) -> Result<StatusCode> {
-    let db = app.db.lock().unwrap();
+    let db = app.db();
     if let Some(token) = bearer(&headers) {
         db.delete_session(token)?;
     }
@@ -101,14 +101,14 @@ async fn logout(State(app): State<Shared>, headers: HeaderMap) -> Result<StatusC
 }
 
 async fn me(State(app): State<Shared>, headers: HeaderMap) -> Result<Json<Me>> {
-    let db = app.db.lock().unwrap();
+    let db = app.db();
     let user = session(&db, &headers)?;
     let orgs = db.orgs(&user.id)?;
     Ok(Json(Me { user, orgs }))
 }
 
 async fn devices(State(app): State<Shared>, headers: HeaderMap) -> Result<Json<Vec<Device>>> {
-    let db = app.db.lock().unwrap();
+    let db = app.db();
     let user = session(&db, &headers)?;
     Ok(Json(db.visible_devices(&user.id)?))
 }
@@ -118,7 +118,7 @@ async fn register(
     headers: HeaderMap,
     Json(req): Json<RegisterDevice>,
 ) -> Result<Json<Registration>> {
-    let db = app.db.lock().unwrap();
+    let db = app.db();
     let user = session(&db, &headers)?;
     let name = req.name.trim();
     if name.is_empty() || name.chars().count() > 64 {
@@ -150,7 +150,7 @@ async fn issue_ticket(
     Path(id): Path<String>,
     Json(req): Json<TicketRequest>,
 ) -> Result<Json<TicketResponse>> {
-    let db = app.db.lock().unwrap();
+    let db = app.db();
     let user = session(&db, &headers)?;
     if !db.visible_devices(&user.id)?.iter().any(|d| d.id == id) {
         return Err(Error(StatusCode::NOT_FOUND, "no such device".into()));
@@ -169,17 +169,19 @@ async fn heartbeat(
     headers: HeaderMap,
     Json(mut hb): Json<Heartbeat>,
 ) -> Result<StatusCode> {
-    let db = app.db.lock().unwrap();
+    let db = app.db();
     let id = device_id(&db, &headers)?;
     hb.addresses.retain(|a| !a.is_empty() && a.len() <= 255);
     hb.addresses.truncate(16);
-    hb.version.truncate(32);
+    if let Some((cut, _)) = hb.version.char_indices().nth(32) {
+        hb.version.truncate(cut);
+    }
     db.heartbeat(&id, &hb)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn unregister(State(app): State<Shared>, headers: HeaderMap) -> Result<StatusCode> {
-    let db = app.db.lock().unwrap();
+    let db = app.db();
     let id = device_id(&db, &headers)?;
     db.delete_device(&id)?;
     log::info!("device {id} removed itself");
@@ -223,7 +225,7 @@ mod tests {
     }
 
     fn sign_in(app: &Shared, name: &str) -> (User, String) {
-        let db = app.db.lock().unwrap();
+        let db = app.db();
         let user = db
             .sign_in(&Identity {
                 provider: "dev".into(),
@@ -356,7 +358,7 @@ mod tests {
     async fn org_devices_need_membership() {
         let app = crate::test_app();
         let (alice, code) = sign_in(&app, "alice");
-        let org = app.db.lock().unwrap().create_org("Team", &alice.id).unwrap();
+        let org = app.db().create_org("Team", &alice.id).unwrap();
         let (_, session) = call::<TokenResponse>(
             &app,
             "POST",

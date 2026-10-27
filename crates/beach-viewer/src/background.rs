@@ -462,6 +462,8 @@ impl Tray {
                 open_viewer();
             } else if *id == items.toggle.id() {
                 let mut st = self.state.lock().unwrap();
+                // The viewer may have changed the file since (e.g. signed in).
+                st.config = config::load();
                 st.config.server.enabled = !st.config.server.enabled;
                 st.save();
                 st.apply();
@@ -471,6 +473,7 @@ impl Tray {
                     log::warn!("autostart: {e}");
                 }
                 let mut st = self.state.lock().unwrap();
+                st.config = config::load();
                 st.config.server.autostart = on;
                 st.save();
             } else if *id == items.quit.id() {

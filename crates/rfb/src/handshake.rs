@@ -307,7 +307,10 @@ pub fn client_handshake_secure<S: Read + Write>(
             s.flush()?;
         }
         SECURITY_BEACH_TICKET => {
-            let tickets = tickets.expect("chosen only with a ticket source");
+            // A 3.3 server picks the type itself and may name this one.
+            let Some(tickets) = tickets else {
+                return Err(Error::UnsupportedSecurity(vec![security]));
+            };
             let mut nonce = [0; TICKET_NONCE_LEN];
             s.read_exact(&mut nonce)?;
             let len = s.u8()? as usize;
