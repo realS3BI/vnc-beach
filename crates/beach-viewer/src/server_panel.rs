@@ -195,11 +195,7 @@ impl ServerPanel {
 
     fn start_background() -> Result<(), String> {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        std::process::Command::new(exe)
-            .arg("--background")
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+        crate::background::spawn(&exe).map_err(|e| e.to_string())
     }
 
     /// Quits the background process and starts a fresh one, which picks up

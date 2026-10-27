@@ -78,6 +78,10 @@ impl Server {
         #[cfg(windows)]
         let _ = enigo::set_dpi_awareness();
 
+        // Bind first: a busy port (the macOS login window agent while the
+        // tray process serves) must not start capture and input every retry.
+        let listener = TcpListener::bind((opts.bind.as_str(), opts.port))
+            .with_context(|| format!("binding {}:{}", opts.bind, opts.port))?;
         let screen = capture::Screen::start(opts.display, opts.fps).context("starting screen capture")?;
         let clipboard = clipboard::Clipboard::start();
         // Without the permission to inject input, still share the screen.
@@ -93,8 +97,6 @@ impl Server {
             }
         };
         let input_missing = !opts.view_only && input.is_none();
-        let listener = TcpListener::bind((opts.bind.as_str(), opts.port))
-            .with_context(|| format!("binding {}:{}", opts.bind, opts.port))?;
         let addr = listener.local_addr()?;
         log::info!("listening on {addr}");
 

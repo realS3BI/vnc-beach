@@ -295,10 +295,7 @@ mod platform {
         let background = super::stop_background();
         let exe = app.join("Contents/MacOS/vnc-beach");
         if background {
-            Command::new(&exe)
-                .arg("--background")
-                .spawn()
-                .map_err(|e| e.to_string())?;
+            crate::background::spawn(&exe).map_err(|e| e.to_string())?;
         }
         Command::new("open")
             .arg("-n")

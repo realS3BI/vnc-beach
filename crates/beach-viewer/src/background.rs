@@ -25,6 +25,11 @@ pub fn run() -> anyhow::Result<()> {
         log::info!("background process already running");
         return Ok(());
     }
+    #[cfg(target_os = "macos")]
+    if relaunch_needed() {
+        log::info!("started as a child process, starting again through LaunchServices");
+        return Ok(spawn(&std::env::current_exe()?)?);
+    }
     let state = Arc::new(Mutex::new(State::load(Role::Tray, None)));
     state.lock().unwrap().apply();
     let quit = Arc::new(AtomicBool::new(false));
@@ -64,6 +69,45 @@ pub fn run() -> anyhow::Result<()> {
     event_loop.run_app(&mut tray)?;
     control::forget(Endpoint::Tray);
     Ok(())
+}
+
+/// Starts `exe --background` as a process of its own.
+///
+/// On macOS a plain child counts as part of its parent for privacy
+/// permissions (TCC's "responsible process"). After an update that parent is
+/// the old viewer whose bundle was moved away: `AXIsProcessTrusted` still
+/// says yes, but macOS silently drops the injected mouse and keyboard
+/// events. Started through LaunchServices, the app answers for itself.
+pub fn spawn(exe: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    if let Some(app) = app_bundle(exe) {
+        let status = std::process::Command::new("/usr/bin/open")
+            .args(["-n", "-g", "-a"])
+            .arg(app)
+            .args(["--args", "--background"])
+            .status()?;
+        return if status.success() {
+            Ok(())
+        } else {
+            Err(std::io::Error::other(format!("open failed: {status}")))
+        };
+    }
+    std::process::Command::new(exe).arg("--background").spawn().map(|_| ())
+}
+
+/// The `.app` bundle `exe` belongs to.
+#[cfg(target_os = "macos")]
+fn app_bundle(exe: &std::path::Path) -> Option<&std::path::Path> {
+    exe.ancestors().nth(3).filter(|p| p.extension().is_some_and(|e| e == "app"))
+}
+
+/// Whether this tray process was started as another process's child (the
+/// updater of 0.3.0 and older did that) and has to start itself again
+/// through LaunchServices to get its own permissions, see [`spawn`].
+#[cfg(target_os = "macos")]
+fn relaunch_needed() -> bool {
+    std::os::unix::process::parent_id() != 1
+        && std::env::current_exe().is_ok_and(|exe| app_bundle(&exe).is_some())
 }
 
 /// `vnc-beach --service-agent`: the server as the Windows service (or the
