@@ -6,14 +6,24 @@ Ein VNC-Server und -Viewer, der einfach funktioniert: auf macOS und Windows, gra
 
 Server und Viewer sprechen Standard-VNC (RFB 3.8, RFC 6143). Der VNC-Beach-Viewer verbindet sich deshalb auch mit anderen VNC-Servern (TigerVNC, RealVNC, macOS-Bildschirmfreigabe mit VNC-Passwort). Umgekehrt können sich TigerVNC, RealVNC Viewer & Co. mit dem VNC-Beach-Server verbinden.
 
+## Plattformen
+
+| Gerät | Viewer | Server | Besonderheiten |
+| --- | --- | --- | --- |
+| macOS | ja | ja | Eine App; Symbol in der Menüleiste; auf Wunsch schon am Anmeldefenster erreichbar. Braucht Bildschirmaufnahme und Bedienungshilfen. Alternativ die eingebaute Bildschirmfreigabe als Server (ohne Zwischenablage). |
+| Windows (64-Bit, 10/11) | ja | ja | Eine Datei; Symbol im Infobereich; als Windows-Dienst auch im Sperr- und Anmeldebildschirm erreichbar. **Ohne eingeschaltete Monitore** braucht es einmalig den virtuellen Bildschirmtreiber `usbmmidd_v2` von Amyuni, siehe [Ohne eingeschaltete Monitore](#ohne-eingeschaltete-monitore-windows). |
+| iPad und iPhone (iOS 18+) | ja | nein | Nur Viewer: verbindet sich mit jedem VNC-Server, teilt aber keinen eigenen Bildschirm. Derzeit in der Testphase über TestFlight, noch nicht öffentlich, siehe [iPad und iPhone](#ipad-und-iphone). |
+
+Der Betrieb ohne Monitor ist nur auf Windows ein Thema. Auf dem Mac gibt es die Funktion nicht und sie wurde dort auch nicht gebraucht: Ein Mac ohne angeschlossenen Monitor behält einen Bildschirm in Standardauflösung, den VNC Beach oder die Bildschirmfreigabe übertragen. Wer dort eine bestimmte Auflösung braucht, nimmt einen HDMI-Dummy-Stecker. Die iOS-App hat keinen Server und ist davon nicht betroffen.
+
 ## Stand
 
-Erste lauffähige Version (0.1). Umgesetzt:
+Version 0.2.5. Umgesetzt:
 
 - Bildschirmübertragung mit ZRLE-Kompression; gesendet werden nur geänderte 64×64-Kacheln
 - VNC-Passwort-Authentifizierung
 - Maus mit drei Tasten und Scrollrad; Retina/HiDPI wird umgerechnet
-- Tastatur: Zeichen werden als Text eingefügt und kommen dadurch unabhängig vom Tastaturlayout an (`@`, `€`, Umlaute). Shortcuts mit Strg/Cmd lösen echte Tasten aus.
+- Tastatur: Zeichen werden als Text eingefügt und kommen dadurch unabhängig vom Tastaturlayout an (`@`, `€`, Umlaute). Shortcuts mit Strg/Cmd lösen echte Tasten aus; Strg und Cmd werden zwischen Mac und Windows automatisch zugeordnet, Strg+Alt+Entf per Knopf.
 - Zwischenablage für Text in beide Richtungen (Latin-1, wie im Standard)
 - Dateiübertragung zwischen Desktop-Viewer und VNC-Beach-Server: lokale Dateien ins VNC-Fenster ziehen, Serverdateien über „Dateien“ herunterladen
 - Auflösungswechsel während der Sitzung (DesktopSize)
@@ -21,11 +31,14 @@ Erste lauffähige Version (0.1). Umgesetzt:
 - Viewer mit Verbindungsdialog; das Fenster passt sich an den entfernten Bildschirm an
 - Favoriten im Viewer: mehrere Rechner mit Name, Adresse und Passwort speichern, bearbeiten und per Doppelklick verbinden
 - Einstellungen pro Verbindung (Farbtiefe, Nur ansehen, Darstellung, Zwischenablage, Vollbild, Fenstergröße) mit Standardwerten, die jeder Favorit einzeln überschreibt
-- Windows: Server im selben Programm als Hintergrunddienst mit Symbol im Infobereich, Autostart beim Anmelden und Status im Viewer
+- Server im selben Programm als Hintergrunddienst mit Symbol im Infobereich bzw. in der Menüleiste, Autostart beim Anmelden und Status im Viewer (Windows und macOS)
+- Vor der Anmeldung erreichbar: Windows-Dienst (auch Sperrbildschirm und UAC), LaunchAgent am macOS-Anmeldefenster, Servermodus für den unbeaufsichtigten Mac
+- Windows ohne eingeschaltete Monitore: automatischer virtueller Bildschirm mit 2560 × 1440 (mit Treiber)
+- Erreichbarkeit: alternative Adressen, SSH-Anmeldung (auch FileVault-Entsperrung), Wake-on-LAN über ein Zugangsgerät
+- Selbst-Update aus den GitHub-Releases (macOS und Windows)
+- iPad- und iPhone-App als Viewer, derzeit in der Testphase über TestFlight
 
-Auf macOS geprüft sind Verbindung, Passwort (richtig und falsch), Bildübertragung samt Farben, Mausposition und der Viewer gegen den Server. Tastatur, Zwischenablage und Auflösungswechsel sind geschrieben, aber noch nicht von Hand durchgetestet.
-
-Auf Windows 11 geprüft: Build und Tests, der Viewer verbindet sich über Tailscale mit dem Mac, und der Server liefert den Windows-Bildschirm aus (2560×1440). Maus- und Tastatureingaben unter Windows (`SendInput`) sind noch nicht getestet.
+Geprüft auf macOS und Windows 11 in beiden Richtungen: Verbindung, Passwort, Bild, Maus, Tastatur, Zwischenablage, Dateiübertragung, Auflösungswechsel, mehrere Bildschirme, Windows-Dienst vor der Anmeldung und der virtuelle Bildschirm ohne Monitore. Nicht praktisch geprüft sind das macOS-Anmeldefenster, der FileVault-Neustart und der Servermodus des Macs nach einem echten Stromausfall.
 
 ## Aufbau
 
@@ -33,7 +46,10 @@ Auf Windows 11 geprüft: Build und Tests, der Viewer verbindet sich über Tailsc
 | --- | --- |
 | `crates/rfb` | Protokoll: Handshake, VNC-Auth, Nachrichten, Pixelformate, ZRLE |
 | `crates/beach-server` | Server: Bildschirmaufnahme (`xcap`), Eingaben (`enigo`), Zwischenablage (`arboard`) |
-| `crates/beach-viewer` | Viewer: Fenster und Eingaben (`eframe`/`egui`) |
+| `crates/beach-viewer` | Viewer: Fenster und Eingaben (`eframe`/`egui`), Hintergrunddienst, Windows-Dienst, Updates |
+| `crates/beach-access` | Erreichbarkeit: SSH-Anmeldung, Wake-on-LAN, alternative Adressen |
+| `crates/beach-mobile` | Client als C-Bibliothek für die iOS-App |
+| `apps/ios` | iPad- und iPhone-App (SwiftUI) |
 
 ## Nutzung
 
@@ -186,18 +202,22 @@ VNC Beach richtet das beim ersten Start selbst ein: Der Viewer startet den Hinte
 
 **Windows:** VNC Beach richtet einen Windows-Dienst ein. Er kopiert das Programm nach `C:\Program Files\VNC Beach`, startet mit Windows und hält den Server als SYSTEM-Prozess in der Konsolensitzung am Laufen. Zuschauer sehen dann auch den Sperr- und Anmeldebildschirm sowie UAC-Abfragen und können dort PIN oder Passwort eingeben. Dabei stellt VNC Beach Tailscale auf „unbeaufsichtigt“ (`tailscale set --unattended`), damit es schon vor der Anmeldung verbunden ist. Das Symbol im Infobereich startet keinen eigenen Server mehr, sondern zeigt und steuert den des Dienstes („Windows-Dienst online …“). Passwort, Port und die anderen Einstellungen kommen weiter aus der `config.toml` des Benutzers, der den Dienst eingerichtet hat; Dateiübertragungen landen in dessen Profil. Nach einem Update erkennt der Hintergrunddienst die ältere Kopie in `Program Files` und fragt erneut nach Administratorrechten. Protokolle: `C:\ProgramData\VNC Beach\` (`service.log`, `agent.log`, `setup.log`).
 
-**Mac:** VNC Beach legt einen LaunchAgent f�r das Anmeldefenster an (`/Library/LaunchAgents/at.schlossers.vnc-beach.loginwindow.plist`, macOS fragt nach einem Administratorpasswort). Er startet den Server, solange niemand angemeldet ist; nach der Anmeldung �bernimmt der Server des Men�leisten-Symbols. Ein Update ersetzt die App an derselben Stelle, der LaunchAgent bleibt g�ltig. Protokolle: `/Library/Logs/VNC Beach/`.
+**Mac:** VNC Beach legt einen LaunchAgent für das Anmeldefenster an (`/Library/LaunchAgents/at.schlossers.vnc-beach.loginwindow.plist`, macOS fragt nach einem Administratorpasswort). Er startet den Server, solange niemand angemeldet ist; nach der Anmeldung übernimmt der Server des Menüleisten-Symbols. Ein Update ersetzt die App an derselben Stelle, der LaunchAgent bleibt gültig. Protokolle: `/Library/Logs/VNC Beach/`.
 
-**Servermodus nach Stromausfall:** In den Server-Einstellungen l�sst sich der Mac ausdr�cklich f�r unbeaufsichtigten Betrieb einrichten. Die normale Installation und ein gew�hnliches Update schalten FileVault nicht ungefragt ab. Erst �FileVault f�r diesen Mac deaktivieren� und �Servermodus einrichten �� starten diese Einrichtung mit dem lokalen Mac-Passwort. Der Servermodus:
+**Servermodus nach Stromausfall:** In den Server-Einstellungen lässt sich der Mac ausdrücklich für unbeaufsichtigten Betrieb einrichten. Die normale Installation und ein gewöhnliches Update schalten FileVault nicht ungefragt ab. Erst „FileVault für diesen Mac deaktivieren“ und „Servermodus einrichten …“ starten diese Einrichtung mit dem lokalen Mac-Passwort. Der Servermodus:
 
 - deaktiviert FileVault, aktiviert SSH und den automatischen Wiederanlauf nach Stromausfall und verhindert den Ruhezustand des Macs;
 - richtet VNC Beach am Anmeldefenster sowie beim Anmelden ein;
-- startet die bestehende eigenst�ndige Tailscale-App �ber einen Benutzer-Dienst in `/Library/LaunchDaemons`, ohne eine Desktop-Anmeldung zu ben�tigen, und versucht die Verbindung bei Ausf�llen alle 60 Sekunden erneut. Ein bereits eingerichteter `tailscaled`-Dienst wird ebenfalls unterst�tzt. Ger�teeintrag, Adresse, Routen und sonstige Einstellungen bleiben erhalten. Tailscale muss vorher angemeldet und seine Netzwerkerweiterung genehmigt sein; die App-Store-Variante wird vor der Anmeldung nicht unterst�tzt;
-- kann zus�tzlich die automatische Anmeldung aktivieren, damit die vorhandenen Benutzer-Dienste starten. Dabei speichert macOS das Anmeldepasswort f�r die automatische Anmeldung. Der Bildschirm wird nach 15 Sekunden ausgeschaltet und verlangt beim Entsperren sofort das Passwort. Diese Sperre ersetzt den Schutz durch FileVault nicht.
+- startet die bestehende eigenständige Tailscale-App über einen Benutzer-Dienst in `/Library/LaunchDaemons`, ohne eine Desktop-Anmeldung zu benötigen, und versucht die Verbindung bei Ausfällen alle 60 Sekunden erneut. Ein bereits eingerichteter `tailscaled`-Dienst wird ebenfalls unterstützt. Geräteeintrag, Adresse, Routen und sonstige Einstellungen bleiben erhalten. Tailscale muss vorher angemeldet und seine Netzwerkerweiterung genehmigt sein; die App-Store-Variante wird vor der Anmeldung nicht unterstützt;
+- kann zusätzlich die automatische Anmeldung aktivieren, damit die vorhandenen Benutzer-Dienste starten. Dabei speichert macOS das Anmeldepasswort für die automatische Anmeldung. Der Bildschirm wird nach 15 Sekunden ausgeschaltet und verlangt beim Entsperren sofort das Passwort. Diese Sperre ersetzt den Schutz durch FileVault nicht.
 
-Die gew�hlte Einrichtung wird rootgesch�tzt in `/Library/Application Support/VNC Beach/server-mode.json` gespeichert. Dort stehen nur Pfade und Optionen, kein Passwort. Das Mac-Passwort wird bei der Einrichtung �ber stdin und ein privates Terminal an die Systemprogramme �bergeben, nicht �ber Kommandozeilenargumente oder VNC-Beach-Konfigurationen. Die urspr�nglichen Einstellungen liegen im nur f�r root lesbaren Unterordner `before-server-mode`. Ein VNC-Beach-Update beh�lt die Auswahl und aktualisiert n�tigenfalls die verwalteten Startdateien nach der Administratorabfrage. Ist FileVault sp�ter wieder aktiv, zeigt VNC Beach den Reparaturbedarf an; es speichert kein Administratorpasswort, mit dem es eine erneute Verschl�sselung heimlich r�ckg�ngig machen k�nnte.
+Die gewählte Einrichtung wird rootgeschützt in `/Library/Application Support/VNC Beach/server-mode.json` gespeichert. Dort stehen nur Pfade und Optionen, kein Passwort. Das Mac-Passwort wird bei der Einrichtung über stdin und ein privates Terminal an die Systemprogramme übergeben, nicht über Kommandozeilenargumente oder VNC-Beach-Konfigurationen. Die ursprünglichen Einstellungen liegen im nur für root lesbaren Unterordner `before-server-mode`. Ein VNC-Beach-Update behält die Auswahl und aktualisiert nötigenfalls die verwalteten Startdateien nach der Administratorabfrage. Ist FileVault später wieder aktiv, zeigt VNC Beach den Reparaturbedarf an; es speichert kein Administratorpasswort, mit dem es eine erneute Verschlüsselung heimlich rückgängig machen könnte.
 
-Die Einrichtung startet den Mac nicht neu. Ein kontrollierter Neustarttest muss best�tigen, dass Tailscale, SSH und VNC Beach am Anmeldefenster sowie die gew�nschten Benutzer-Dienste erreichbar sind. Wenn macOS noch vor dem Start auf das FileVault-Passwort wartet, kann auch dieser Dienst nicht laufen. Ein davon unabh�ngiger Heimnetz-VPN-Zugang bleibt deshalb ein sinnvoller Wiederherstellungsweg. Die Passwortabfrage sch�tzt nicht vor physischem Datenzugriff, wenn FileVault ausgeschaltet ist.
+Die Einrichtung startet den Mac nicht neu. Ein kontrollierter Neustarttest muss bestätigen, dass Tailscale, SSH und VNC Beach am Anmeldefenster sowie die gewünschten Benutzer-Dienste erreichbar sind. Wenn macOS noch vor dem Start auf das FileVault-Passwort wartet, kann auch dieser Dienst nicht laufen. Ein davon unabhängiger Heimnetz-VPN-Zugang bleibt deshalb ein sinnvoller Wiederherstellungsweg. Die Passwortabfrage schützt nicht vor physischem Datenzugriff, wenn FileVault ausgeschaltet ist.
+
+#### Ohne eingeschaltete Monitore (Windows)
+
+Nur Windows; Mac und iOS-App sind nicht betroffen, siehe [Plattformen](#plattformen). Melden sich alle Monitore beim Ausschalten von Windows ab, zeigt Windows nur noch einen kleinen Ersatzbildschirm (oft 1024 × 768). Mit dem virtuellen Bildschirmtreiber „usbmmidd_v2“ von Amyuni Technologies stellt VNC Beach dann automatisch genau einen Bildschirm mit 2560 × 1440 bereit. Sobald ein echter Monitor zurück ist, entfernt VNC Beach ihn wieder, auch während einer Sitzung und im Windows-Dienst. Den Treiber richtet *Dieser Computer → Einstellungen → Virtueller Bildschirm → Treiber einrichten* einmalig mit Administratorrechten ein (oder `vnc-beach.exe --install-display-driver`). Er wird beim Hersteller geladen und steht unter dessen Lizenz. Details, Grenzen und Tests: [`docs/headless-windows.md`](docs/headless-windows.md).
 
 Für „Rechner einschalten und aus der Ferne drauf“ braucht es zusätzlich:
 
@@ -243,13 +263,12 @@ Klassisches VNC verschlüsselt den Bildschirminhalt nicht, und die VNC-Passwort-
 
 ## Roadmap
 
-1. Auf echtem Windows testen (Server und Viewer, HiDPI, mehrere Monitore mit unterschiedlicher Skalierung)
+1. iPad- und iPhone-App aus der Testphase in den App Store bringen
 2. Verschlüsselung (VeNCrypt/TLS) und ein stärkeres Passwortverfahren
 3. Schnellere Aufnahme: ScreenCaptureKit (macOS) und DXGI-Streaming (Windows) statt Einzelbildern
 4. Mauszeiger übertragen (Cursor-Pseudo-Encoding)
-5. Viewer: Cmd↔Strg-Zuordnung bei Mac → Windows
-6. Unicode-Zwischenablage (Extended Clipboard)
-7. Notarisierte macOS-App (Developer ID) und signierte Windows-Exe für Downloads im Browser
+5. Unicode-Zwischenablage (Extended Clipboard)
+6. Notarisierte macOS-App (Developer ID) und signierte Windows-Exe für Downloads im Browser
 
 ## Mac als Server: eingebaute Bildschirmfreigabe oder VNC Beach
 

@@ -36,6 +36,11 @@ pub struct ServerPanel {
     mac_auto_login: bool,
     #[cfg(target_os = "macos")]
     mac_finished: bool,
+    /// The virtual display driver is installed (checked when the settings open).
+    #[cfg(windows)]
+    driver_installed: bool,
+    #[cfg(windows)]
+    driver_setup: Option<Receiver<Result<(), String>>>,
 }
 
 impl ServerPanel {
@@ -92,6 +97,10 @@ impl ServerPanel {
             mac_auto_login: false,
             #[cfg(target_os = "macos")]
             mac_finished: false,
+            #[cfg(windows)]
+            driver_installed: false,
+            #[cfg(windows)]
+            driver_setup: None,
         }
     }
 
@@ -115,8 +124,61 @@ impl ServerPanel {
                 }
             }
         }
+        #[cfg(windows)]
+        if let Some(result) = self.driver_setup.as_ref().and_then(|receive| receive.try_recv().ok()) {
+            self.driver_setup = None;
+            self.driver_installed = crate::display_driver::installed();
+            if let Err(e) = result {
+                self.error = Some(e);
+            }
+        }
         while let Ok(status) = self.polls.try_recv() {
             self.status = status;
+        }
+    }
+
+    /// Windows: status of the virtual display driver and its setup button.
+    #[cfg(windows)]
+    fn virtual_display_row(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(6.0);
+        ui.strong("Virtueller Bildschirm");
+        if self.driver_installed {
+            ui.weak(
+                "Eingerichtet: Sind alle Monitore aus, stellt VNC Beach einen Bildschirm mit 2560 × 1440 \
+                 bereit und entfernt ihn wieder, sobald ein Monitor zurück ist.",
+            );
+            return;
+        }
+        ui.weak(
+            "Sind alle Monitore aus, zeigt Windows nur einen kleinen Ersatzbildschirm. Mit dem kostenlosen \
+             Treiber „usbmmidd_v2“ von Amyuni Technologies stellt VNC Beach dann einen Bildschirm mit \
+             2560 × 1440 bereit. Der Treiber wird von amyuni.com geladen, steht unter der Lizenz des \
+             Herstellers und braucht Administratorrechte.",
+        );
+        if self.driver_setup.is_some() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("Treiber wird eingerichtet …");
+            });
+        } else if theme::Button::new("Treiber einrichten", Kind::Secondary)
+            .small()
+            .show(ui)
+            .clicked()
+        {
+            let (send, receive) = channel();
+            let context = ui.ctx().clone();
+            self.driver_setup = Some(receive);
+            self.error = None;
+            std::thread::spawn(move || {
+                let result = service::request_display_driver().map_err(|e| match e {
+                    service::SetupError::Cancelled => {
+                        "Ohne Administratorrechte lässt sich der Treiber nicht einrichten.".to_string()
+                    }
+                    service::SetupError::Failed(e) => e,
+                });
+                let _ = send.send(result);
+                context.request_repaint();
+            });
         }
     }
 
@@ -231,6 +293,10 @@ impl ServerPanel {
                         {
                             self.draft = Some(config.server.clone());
                             self.displays = beach_server::displays().unwrap_or_default();
+                            #[cfg(windows)]
+                            {
+                                self.driver_installed = crate::display_driver::installed();
+                            }
                         }
                     });
                 });
@@ -450,6 +516,8 @@ impl ServerPanel {
                 }
                 #[cfg(target_os = "macos")]
                 self.mac_server_row(ui);
+                #[cfg(windows)]
+                self.virtual_display_row(ui);
                 ui.add_space(8.0);
                 egui::Grid::new("server-settings")
                     .num_columns(2)

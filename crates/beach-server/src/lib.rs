@@ -6,6 +6,7 @@ pub mod clipboard;
 #[cfg(windows)]
 pub mod desktop;
 pub mod files;
+pub mod headless;
 pub mod input;
 #[cfg(target_os = "macos")]
 pub mod keymap;

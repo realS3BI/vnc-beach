@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VNC Beach – Bildschirm teilen, ganz entspannt</title>
-<meta name="description" content="VNC Beach ist ein kostenloser VNC-Server und -Viewer für macOS und Windows. Standard-VNC (RFB 3.8), Favoriten, Einstellungen pro Verbindung, Server im Hintergrund.">
+<meta name="description" content="VNC Beach ist ein kostenloser VNC-Server und -Viewer für macOS und Windows, mit Viewer-App für iPad und iPhone. Standard-VNC (RFB 3.8), Favoriten, Server im Hintergrund, erreichbar vor der Anmeldung.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="icon" href="favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta property="og:title" content="VNC Beach">
-<meta property="og:description" content="Kostenloser VNC-Server und -Viewer für macOS und Windows.">
+<meta property="og:description" content="Kostenloser VNC-Server und -Viewer für macOS und Windows, Viewer für iPad und iPhone.">
 <meta property="og:image" content="logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -189,6 +189,14 @@
   .sea h2 { color: #fff; }
   .sea .intro { max-width: 40em; font-size: 19px; color: #CFEAF7; margin: 14px 0 44px; }
   .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+  .cols.three, .steps.three { grid-template-columns: 1fr 1fr 1fr; }
+  .platforms { margin-bottom: 44px; }
+  .platforms .card .who { color: #FFD35C; font-weight: 700; }
+  .soon {
+    display: inline-block; margin-left: 8px; padding: 2px 10px; border-radius: 999px;
+    background: var(--red); color: #fff; font-family: var(--display); font-size: 12px;
+    font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; vertical-align: middle;
+  }
   .card {
     background: rgba(255,255,255,0.08);
     border: 1px solid rgba(255,255,255,0.18);
@@ -253,7 +261,7 @@
     .hero { grid-template-columns: 1fr; padding-bottom: 90px; gap: 36px; }
     .postcard { transform: rotate(-1deg); }
     .sun { width: 180px; height: 180px; top: 20px; }
-    .cols, .steps { grid-template-columns: 1fr; }
+    .cols, .steps, .cols.three, .steps.three { grid-template-columns: 1fr; }
     .interop { grid-template-columns: 1fr; }
     .postcard .back { grid-template-columns: 1fr; }
     .postcard .address { border-left: 0; padding-left: 0; min-height: 90px; }
@@ -271,9 +279,9 @@
     </nav>
     <div class="hero">
       <div>
-        <span class="eyebrow">Kostenlos · Open Source · macOS &amp; Windows</span>
+        <span class="eyebrow">Kostenlos · Open Source · macOS &amp; Windows · iPad bald</span>
         <h1>Bildschirm teilen, ganz <em>entspannt.</em></h1>
-        <p class="lead">VNC Beach ist ein VNC-Server und -Viewer für macOS und Windows. Er spricht das ganz normale VNC-Protokoll, kostet nichts und wird nichts kosten.</p>
+        <p class="lead">VNC Beach ist ein VNC-Server und -Viewer für macOS und Windows. Eine Viewer-App für iPad und iPhone ist in der Testphase. Alles spricht das ganz normale VNC-Protokoll, kostet nichts und wird nichts kosten.</p>
         <div class="cta">
           <a class="btn primary" href="https://github.com/realS3BI/vnc-beach/releases">Herunterladen</a>
           <a class="btn ghost" href="#loslegen">So geht's</a>
@@ -309,14 +317,46 @@
   </svg>
 </div>
 
-<section class="sea" id="funktionen">
+<section class="sea" id="plattformen">
   <div class="wrap">
-    <h2>Was drin ist</h2>
+    <h2>Für welche Geräte</h2>
+    <p class="intro">Mac und Windows-PC können beides: zuschauen und den eigenen Bildschirm teilen. iPad und iPhone schauen zu, sobald die App fertig ist.</p>
+    <div class="cols three platforms">
+      <div class="card">
+        <h3>macOS</h3>
+        <div class="who">Viewer und Server</div>
+        <ul>
+          <li>Eine App, Symbol in der Menüleiste, Server auf Wunsch schon am Anmeldefenster.</li>
+          <li>Braucht Bildschirmaufnahme und Bedienungshilfen unter <em>Datenschutz &amp; Sicherheit</em>; macOS fragt beim ersten Start.</li>
+          <li>Alternativ die eingebaute Bildschirmfreigabe von macOS als Server nutzen, dann ohne Zwischenablage.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Windows</h3>
+        <div class="who">Viewer und Server</div>
+        <ul>
+          <li>Eine Datei, Symbol im Infobereich, als Windows-Dienst auch im Sperr- und Anmeldebildschirm erreichbar.</li>
+          <li><strong>Ohne eingeschaltete Monitore</strong> stellt VNC Beach einen Bildschirm mit 2560 × 1440 bereit. Dafür ist einmalig ein virtueller Bildschirmtreiber nötig, <a href="#ohne-monitor">siehe unten</a>.</li>
+          <li>64-Bit-Windows 10 oder 11.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>iPad und iPhone <span class="soon">Bald</span></h3>
+        <div class="who">Nur Viewer · in der Testphase</div>
+        <ul>
+          <li>Noch nicht öffentlich: Die App wird gerade über TestFlight getestet. Sobald sie fertig ist, steht sie hier.</li>
+          <li>Verbindet sich mit jedem VNC-Server, hat aber keinen eigenen: Ein iPad lässt sich damit nicht fernsteuern.</li>
+          <li>Finger, Apple Pencil, Trackpad und Hardware-Tastatur; ⌘ wird zu Strg; Umschalten zwischen den Bildschirmen des Servers.</li>
+          <li>Favoriten mit Passwörtern im Schlüsselbund, Bonjour-Suche im WLAN, <code>vncbeach://name</code> für Kurzbefehle.</li>
+        </ul>
+      </div>
+    </div>
+    <h2 id="funktionen">Was drin ist</h2>
     <p class="intro">Ein Viewer und ein Server für beide Systeme. Auf dem Mac geht auch die eingebaute Bildschirmfreigabe, nur die Zwischenablage gibt es dann nicht.</p>
     <div class="cols">
       <div class="card">
         <h3>Viewer</h3>
-        <div class="who">macOS und Windows</div>
+        <div class="who">macOS und Windows, bald iPad und iPhone</div>
         <ul>
           <li><strong>Favoriten</strong> mit Name, Adresse und Passwort. Doppelklick verbindet.</li>
           <li><strong>Einstellungen pro Verbindung:</strong> Farbtiefe bis 256 Farben für langsame Leitungen, Nur ansehen, Originalgröße oder ans Fenster angepasst, Vollbild beim Verbinden. Alles mit Standardwerten, die jeder Favorit einzeln überschreiben kann.</li>
@@ -357,7 +397,7 @@
   <div class="wrap">
     <h2>Loslegen</h2>
     <p class="intro">Eine Datei, keine Installation. Beim ersten Start zeigt der Viewer links die Favoriten und auf Windows den Stand des eigenen Servers.</p>
-    <div class="steps">
+    <div class="steps three">
       <div class="os">
         <h3>Auf Windows</h3>
         <ol>
@@ -374,6 +414,14 @@
           <li>Für den Kommandozeilen-Server braucht das Terminal Bildschirmaufnahme und Bedienungshilfen in den Datenschutz-Einstellungen.</li>
         </ol>
       </div>
+      <div class="os">
+        <h3>Auf iPad und iPhone <span class="soon">Bald</span></h3>
+        <p>Die App ist noch in der Testphase und nicht öffentlich erhältlich. Wer selbst bauen will, findet sie im Repository unter <code>apps/ios</code> (iOS 18 oder neuer, Xcode nötig).</p>
+        <p>Geplant: Favorit anlegen, tippen, verbunden. Finger, Apple Pencil, Trackpad und Hardware-Tastatur, dazu eine Zusatzleiste mit Esc, Strg, Alt, Win, Pfeilen und Strg+Alt+Entf.</p>
+      </div>
+    </div>
+    <div class="note" id="ohne-monitor">
+      <strong>Windows ohne eingeschaltete Monitore.</strong> Manche Monitore melden sich beim Ausschalten komplett ab; Windows zeigt dann nur noch einen kleinen Ersatzbildschirm, und genau den würde VNC Beach teilen. Deshalb stellt VNC Beach auf Windows bei Bedarf selbst einen Bildschirm mit 2560 × 1440 bereit und entfernt ihn, sobald ein Monitor zurück ist. Voraussetzung ist der kostenlose, von Microsoft signierte Bildschirmtreiber <em>usbmmidd_v2</em> von Amyuni Technologies: einmalig unter „Dieser Computer → Einstellungen → Virtueller Bildschirm → Treiber einrichten“ mit Administratorrechten einrichten. Er wird beim Hersteller geladen und steht unter dessen Lizenz. Auf dem Mac gibt es diese Funktion nicht; ein Mac behält ohne Monitor einen Bildschirm in Standardauflösung. Details: <a href="https://github.com/realS3BI/vnc-beach/blob/main/docs/headless-windows.md">docs/headless-windows.md</a>.
     </div>
     <div class="note">
       <strong>Nur im eigenen Netz.</strong> Klassisches VNC verschlüsselt nichts, und das VNC-Passwort ist nach heutigen Maßstäben schwach. Den Port nie direkt ins Internet freigeben, sondern über ein VPN wie Tailscale oder WireGuard verbinden.
