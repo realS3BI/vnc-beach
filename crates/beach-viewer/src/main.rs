@@ -10,6 +10,8 @@ mod client;
 mod clipboard;
 mod config;
 mod control;
+#[cfg(windows)]
+mod display_driver;
 mod files;
 mod icon;
 mod keys;
@@ -42,6 +44,10 @@ struct Args {
     /// Set up the Windows service (needs administrator rights).
     #[arg(long, hide = true)]
     install_service: bool,
+    /// Install the virtual display driver used while no monitor is attached
+    /// (Windows, needs administrator rights).
+    #[arg(long)]
+    install_display_driver: bool,
     /// Remove the Windows service (needs administrator rights).
     #[arg(long, hide = true)]
     uninstall_service: bool,
@@ -65,7 +71,13 @@ fn main() {
     if let Some(dir) = &args.config_dir {
         servers::set_config_dir(dir.clone());
     }
-    if args.service || args.service_agent || args.install_service || args.uninstall_service || args.install_server_mode {
+    if args.service
+        || args.service_agent
+        || args.install_service
+        || args.uninstall_service
+        || args.install_display_driver
+        || args.install_server_mode
+    {
         std::process::exit(match run_service_mode(&args) {
             Ok(()) => 0,
             Err(e) => {
@@ -108,7 +120,7 @@ fn init_logging(args: &Args) {
         "service.log"
     } else if args.service_agent {
         "agent.log"
-    } else if args.install_service || args.uninstall_service || args.install_server_mode {
+    } else if args.install_service || args.uninstall_service || args.install_display_driver || args.install_server_mode {
         "setup.log"
     } else {
         ""
@@ -144,6 +156,11 @@ fn run_service_mode(args: &Args) -> anyhow::Result<()> {
         anyhow::bail!("--service is Windows only");
     } else if args.service_agent {
         background::run_agent(args.home.clone())
+    } else if args.install_display_driver {
+        #[cfg(windows)]
+        return display_driver::install();
+        #[cfg(not(windows))]
+        anyhow::bail!("--install-display-driver is Windows only");
     } else if args.install_service {
         service::install(&paths()?)
     } else {

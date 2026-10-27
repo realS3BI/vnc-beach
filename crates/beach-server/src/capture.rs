@@ -166,9 +166,9 @@ impl Screen {
         std::thread::Builder::new()
             .name("capture".into())
             .spawn(move || {
-                #[cfg(windows)]
-                crate::desktop::follow_input();
-                let source = match open(display) {
+                let mut watcher = Watcher::new();
+                watcher.fallback();
+                let source = match open_patiently(display, &mut watcher) {
                     Ok((source, first)) => {
                         let _ = init_tx.send(Ok(first));
                         source
@@ -179,7 +179,7 @@ impl Screen {
                     }
                 };
                 if let Ok(screen) = screen_rx.recv() {
-                    screen.capture_loop(source, display, fps);
+                    screen.capture_loop(source, display, fps, watcher);
                 }
             })?;
 
@@ -215,10 +215,16 @@ impl Screen {
         *self.latest.lock().unwrap() = Arc::new(frame);
     }
 
-    fn capture_loop(&self, mut source: Source, display: Display, fps: u32) {
+    fn capture_loop(&self, mut source: Source, display: Display, fps: u32, mut watcher: Watcher) {
         let interval = Duration::from_secs_f64(1.0 / fps as f64);
         let mut failures = 0;
         while !self.stopped.load(Ordering::Acquire) {
+            // Displays can come and go while the old ones still capture fine
+            // (a monitor switched on next to the virtual display), and with
+            // nobody watching: check the arrangement on its own.
+            if watcher.due() && watcher.changed(display, &source.layout) {
+                self.reopen(&mut source, display);
+            }
             if self.viewers.load(Ordering::Acquire) == 0 {
                 std::thread::sleep(Duration::from_millis(100));
                 continue;
@@ -241,22 +247,94 @@ impl Screen {
                     // A display was unplugged or changed resolution: re-read
                     // the arrangement, but not more often than once a second.
                     std::thread::sleep(Duration::from_secs(1));
-                    match open(display) {
-                        Ok((new_source, first)) => {
-                            if *new_source.layout != *source.layout {
-                                log::info!("display arrangement changed: framebuffer {}x{}", first.width, first.height);
-                            }
-                            source = new_source;
-                            failures = 0;
-                            self.publish(first);
-                        }
-                        Err(e) => log::debug!("reopening displays failed: {e:#}"),
+                    watcher.fallback();
+                    if self.reopen(&mut source, display) {
+                        failures = 0;
                     }
                     continue;
                 }
             }
             if let Some(rest) = interval.checked_sub(started.elapsed()) {
                 std::thread::sleep(rest);
+            }
+        }
+    }
+
+    /// Picks the displays again and publishes a first frame of them. False
+    /// if that failed (the old source stays).
+    fn reopen(&self, source: &mut Source, display: Display) -> bool {
+        match open(display) {
+            Ok((new_source, first)) => {
+                if *new_source.layout != *source.layout {
+                    log::info!("display arrangement changed: framebuffer {}x{}", first.width, first.height);
+                }
+                *source = new_source;
+                self.publish(first);
+                true
+            }
+            Err(e) => {
+                log::debug!("reopening displays failed: {e:#}");
+                false
+            }
+        }
+    }
+}
+
+/// Once a second: keeps the Windows virtual display in step (see
+/// [`crate::headless`]) and notices displays that came, went or moved.
+struct Watcher {
+    next: Instant,
+    #[cfg(windows)]
+    fallback: crate::headless::Fallback<crate::headless::Amyuni>,
+}
+
+/// How often [`Watcher`] looks.
+const WATCH_INTERVAL: Duration = Duration::from_secs(1);
+/// How long the first capture may wait for a display at start: right after
+/// boot or a monitor switch Windows can briefly have none.
+const START_GRACE: Duration = Duration::from_secs(if cfg!(windows) { 15 } else { 0 });
+
+impl Watcher {
+    fn new() -> Watcher {
+        Watcher {
+            next: Instant::now() + WATCH_INTERVAL,
+            #[cfg(windows)]
+            fallback: crate::headless::Fallback::new(crate::headless::Amyuni::new()),
+        }
+    }
+
+    /// True once a second.
+    fn due(&mut self) -> bool {
+        let now = Instant::now();
+        if now < self.next {
+            return false;
+        }
+        self.next = now + WATCH_INTERVAL;
+        true
+    }
+
+    /// Adds or removes the virtual display if needed; true if it did.
+    fn fallback(&mut self) -> bool {
+        #[cfg(windows)]
+        {
+            crate::desktop::follow_input();
+            self.fallback.tick()
+        }
+        #[cfg(not(windows))]
+        false
+    }
+
+    /// Whether the displays to share differ from `layout`.
+    fn changed(&mut self, display: Display, layout: &Layout) -> bool {
+        if self.fallback() {
+            return true;
+        }
+        match arrangement(display) {
+            Ok(now) => now != layout.screens.iter().map(|s| (s.id, s.desktop)).collect::<Vec<_>>(),
+            // No displays for a moment: keep the old source until they're back.
+            Err(e) => {
+                log::debug!("reading the display arrangement failed: {e:#}");
+                false
             }
         }
     }
@@ -375,6 +453,41 @@ fn open(display: Display) -> anyhow::Result<(Source, Frame)> {
     let source = Source { monitors, layout };
     let first = grab_all(&source)?;
     Ok((source, first))
+}
+
+/// [`open`], retried for [`START_GRACE`] while no display is there yet.
+fn open_patiently(display: Display, watcher: &mut Watcher) -> anyhow::Result<(Source, Frame)> {
+    let deadline = Instant::now() + START_GRACE;
+    loop {
+        match open(display) {
+            Ok(opened) => return Ok(opened),
+            Err(e) if Instant::now() < deadline => {
+                log::info!("no display to capture yet ({e:#}), trying again");
+                std::thread::sleep(WATCH_INTERVAL);
+                watcher.fallback();
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+/// Id and desktop geometry of the displays `display` picks, as in
+/// [`ScreenRect`].
+fn arrangement(display: Display) -> anyhow::Result<Vec<(u32, Geometry)>> {
+    pick(display)?
+        .iter()
+        .map(|m| {
+            Ok((
+                m.id().unwrap_or(0),
+                Geometry {
+                    x: m.x()?,
+                    y: m.y()?,
+                    width: m.width()?,
+                    height: m.height()?,
+                },
+            ))
+        })
+        .collect()
 }
 
 fn pick(display: Display) -> anyhow::Result<Vec<Monitor>> {

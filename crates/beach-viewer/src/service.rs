@@ -116,7 +116,7 @@ pub fn request_uninstall() -> Result<(), SetupError> {
 }
 
 #[cfg(windows)]
-pub use platform::{install, run_service, uninstall};
+pub use platform::{install, request_display_driver, run_service, uninstall};
 #[cfg(target_os = "macos")]
 pub use platform::{install, uninstall};
 
@@ -472,7 +472,7 @@ mod platform {
 
     /// Runs `exe` elevated with `args` and waits for it. The user may
     /// decline the UAC prompt.
-    fn run_elevated(exe: &Path, args: &[String]) -> Result<(), SetupError> {
+    fn run_elevated(exe: &Path, args: &[String], what: &str) -> Result<(), SetupError> {
         let file = wide(exe.as_os_str());
         let params = wide(OsStr::new(&command_line(args)));
         let verb = wide(OsStr::new("runas"));
@@ -505,7 +505,7 @@ mod platform {
             if code != 0 {
                 let log = super::log_path("setup.log").map(|p| p.display().to_string()).unwrap_or_default();
                 return Err(SetupError::Failed(format!(
-                    "Einrichten des Windows-Dienstes fehlgeschlagen, Details in {log}"
+                    "Einrichten {what} fehlgeschlagen, Details in {log}"
                 )));
             }
         }
@@ -518,13 +518,20 @@ mod platform {
         let paths = Paths::current().ok_or_else(|| SetupError::Failed("Konfigurationsordner unbekannt".into()))?;
         let mut args = vec!["--install-service".to_string()];
         args.extend(paths.args());
-        run_elevated(exe, &args)
+        run_elevated(exe, &args, "des Windows-Dienstes")
     }
 
     /// Removes the service. Asks for administrator rights.
     pub fn request_uninstall() -> Result<(), SetupError> {
         let exe = std::env::current_exe().map_err(|e| SetupError::Failed(e.to_string()))?;
-        run_elevated(&exe, &["--uninstall-service".into()])
+        run_elevated(&exe, &["--uninstall-service".into()], "des Windows-Dienstes")
+    }
+
+    /// Installs the virtual display driver (see `crate::display_driver`).
+    /// Asks for administrator rights.
+    pub fn request_display_driver() -> Result<(), SetupError> {
+        let exe = std::env::current_exe().map_err(|e| SetupError::Failed(e.to_string()))?;
+        run_elevated(&exe, &["--install-display-driver".into()], "des virtuellen Bildschirms")
     }
 
     /// `--install-service`: runs elevated.

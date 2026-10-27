@@ -199,6 +199,10 @@ Die gewählte Einrichtung wird rootgeschützt in `/Library/Application Support/V
 
 Die Einrichtung startet den Mac nicht neu. Ein kontrollierter Neustarttest muss bestätigen, dass Tailscale, SSH und VNC Beach am Anmeldefenster sowie die gewünschten Benutzer-Dienste erreichbar sind. Wenn macOS noch vor dem Start auf das FileVault-Passwort wartet, kann auch dieser Dienst nicht laufen. Ein davon unabhängiger Heimnetz-VPN-Zugang bleibt deshalb ein sinnvoller Wiederherstellungsweg. Die Passwortabfrage schützt nicht vor physischem Datenzugriff, wenn FileVault ausgeschaltet ist.
 
+#### Ohne eingeschaltete Monitore (Windows)
+
+Melden sich alle Monitore beim Ausschalten von Windows ab, zeigt Windows nur noch einen kleinen Ersatzbildschirm (oft 1024 × 768). Mit dem virtuellen Bildschirmtreiber „usbmmidd_v2“ von Amyuni Technologies stellt VNC Beach dann automatisch genau einen Bildschirm mit 2560 × 1440 bereit. Sobald ein echter Monitor zurück ist, entfernt VNC Beach ihn wieder, auch während einer Sitzung und im Windows-Dienst. Den Treiber richtet *Dieser Computer → Einstellungen → Virtueller Bildschirm → Treiber einrichten* einmalig mit Administratorrechten ein (oder `vnc-beach.exe --install-display-driver`). Er wird beim Hersteller geladen und steht unter dessen Lizenz. Details, Grenzen und Tests: [`docs/headless-windows.md`](docs/headless-windows.md).
+
 Für „Rechner einschalten und aus der Ferne drauf“ braucht es zusätzlich:
 
 - **Tailscale-Schlüssel:** im Tailscale-Admin-Panel für das Gerät „Disable key expiry“ wählen, sonst muss man sich alle paar Monate neu anmelden.
