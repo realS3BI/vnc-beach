@@ -6,6 +6,8 @@
 mod access;
 #[path = "../src/access_ui.rs"]
 mod access_ui;
+#[path = "../src/account.rs"]
+mod account;
 #[path = "../src/client.rs"]
 mod client;
 #[path = "../src/servers.rs"]
@@ -14,6 +16,11 @@ mod servers;
 mod settings;
 #[path = "../src/theme.rs"]
 mod theme;
+mod update {
+    pub(crate) fn curl_path() -> std::path::PathBuf {
+        "curl".into()
+    }
+}
 
 struct Preview {
     access: access::Access,

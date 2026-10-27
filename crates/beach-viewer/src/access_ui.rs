@@ -288,6 +288,7 @@ mod tests {
         };
         let mut connecting = Connecting::new(crate::access::start(
             crate::servers::Server::default(),
+            None,
             crate::access::Action::Connect,
             rfb::PixelFormat::BGRX,
             || {},
@@ -334,6 +335,7 @@ mod tests {
         };
         let mut connecting = Connecting::new(crate::access::start(
             crate::servers::Server::default(),
+            None,
             crate::access::Action::Connect,
             rfb::PixelFormat::BGRX,
             || {},

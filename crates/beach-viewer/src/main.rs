@@ -2,7 +2,9 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod access;
+mod account;
 mod access_ui;
+mod account_ui;
 mod app;
 mod autostart;
 mod background;

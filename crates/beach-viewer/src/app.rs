@@ -13,6 +13,7 @@ use rfb::messages::ClientMessage;
 
 use crate::access::Action;
 use crate::access_ui::{self, Connecting};
+use crate::account_ui::{self, AccountPanel};
 use crate::client::{Connection, Notice, Region, RemoteKind, Screen};
 use crate::clipboard::Clipboard;
 use crate::config::{self, Config};
@@ -48,6 +49,11 @@ pub struct App {
     /// Search text over the favorites (only shown for longer lists).
     filter: String,
     requested_action: Option<Action>,
+    account: AccountPanel,
+    /// Account device to connect to, picked in the sidebar.
+    account_connect: Option<beach_account::api::Device>,
+    /// Window title for the connection being set up, if not the form's.
+    connect_label: Option<String>,
 }
 
 /// Where the update check stands.
@@ -106,7 +112,11 @@ impl App {
         );
         let directory = Directory::load();
         update::clean_up();
+        let config = config::load();
         App {
+            account: AccountPanel::new(&config),
+            account_connect: None,
+            connect_label: None,
             logo,
             show_password: false,
             settings_open: false,
@@ -114,7 +124,7 @@ impl App {
             requested_action: None,
             update: Update::check(&cc.egui_ctx, false),
             directory,
-            config: config::load(),
+            config,
             editing: None,
             confirm_delete: false,
             form: Server::default(),
@@ -127,6 +137,7 @@ impl App {
 
     /// Fills the form from a saved server.
     fn select(&mut self, index: usize) {
+        self.account.deselect();
         if let Some(server) = self.directory.servers.get(index) {
             self.form = server.clone();
             self.editing = Some(index);
@@ -137,6 +148,7 @@ impl App {
     }
 
     fn clear_form(&mut self) {
+        self.account.deselect();
         self.form = Server::default();
         self.editing = None;
         self.confirm_delete = false;
@@ -187,9 +199,37 @@ impl App {
 
     fn connect(&mut self, ctx: &egui::Context, action: Action) {
         let settings = self.settings();
+        self.connect_to(ctx, self.form.clone(), None, settings, action);
+        self.connect_label = None;
+    }
+
+    /// Connects to an account device with the default settings.
+    fn connect_account(&mut self, ctx: &egui::Context, device: &beach_account::api::Device) {
+        let target = crate::account::Target {
+            url: self.config.account.url.clone(),
+            token: self.config.account.token.clone(),
+            device: device.id.clone(),
+        };
+        let server = account_ui::server_for(device);
+        if server.host.is_empty() {
+            self.error = Some(format!("{} hat noch keine Adresse gemeldet.", device.name));
+            return;
+        }
+        self.connect_to(ctx, server, Some(target), self.config.viewer, Action::Connect);
+        self.connect_label = Some(device.name.clone());
+    }
+
+    fn connect_to(
+        &mut self,
+        ctx: &egui::Context,
+        server: Server,
+        account: Option<crate::account::Target>,
+        settings: Settings,
+        action: Action,
+    ) {
         let pf = settings.colors.pixel_format();
         let ctx = ctx.clone();
-        let task = crate::access::start(self.form.clone(), action, pf, move || ctx.request_repaint());
+        let task = crate::access::start(server, account, action, pf, move || ctx.request_repaint());
         self.error = None;
         self.state = State::Connecting(Box::new(Connecting::new(task)), settings);
     }
@@ -207,6 +247,9 @@ impl App {
     /// Name shown in the title bar and toolbar: the saved name, else the
     /// desktop name the server reports.
     fn label(&self, conn: &Connection) -> String {
+        if let Some(label) = &self.connect_label {
+            return label.clone();
+        }
         match self.editing {
             Some(_) if !self.form.name.trim().is_empty() => self.form.name.trim().to_string(),
             _ => conn.name.clone(),
@@ -259,7 +302,14 @@ impl App {
                             |ui| {
                                 ui.set_width(width);
                                 ui.add_space(8.0);
-                                connect |= self.form_fields(ui, width);
+                                if self.account.selected().is_some() {
+                                    let connecting = matches!(self.state, State::Connecting(..));
+                                    if self.account.details(ui, width, connecting) {
+                                        self.account_connect = self.account.selected().cloned();
+                                    }
+                                } else {
+                                    connect |= self.form_fields(ui, width);
+                                }
                                 if let Some(err) = self.error.clone() {
                                     ui.add_space(12.0);
                                     theme::banner(ui, theme::CORAL).show(ui, |ui| {
@@ -273,7 +323,11 @@ impl App {
                     });
                 });
             });
-        if connect && self.can_connect() {
+        if let Some(device) = self.account_connect.take() {
+            if !matches!(self.state, State::Connecting(..)) {
+                self.connect_account(&ctx, &device);
+            }
+        } else if connect && self.can_connect() {
             self.connect(&ctx, Action::Connect);
         } else if let Some(action) = self.requested_action.take() {
             if self.can_connect() {
@@ -401,6 +455,18 @@ impl App {
             ui.label(RichText::new("VNC Beach").font(theme::bold(18.0)).color(p.text));
         });
         ui.add_space(16.0);
+        let before = self.account.selected().map(|d| d.id.clone());
+        if let Some(device) = self.account.show(ui, &mut self.config) {
+            self.account_connect = Some(device);
+        }
+        let after = self.account.selected().map(|d| d.id.clone());
+        if after.is_some() && after != before {
+            // An account device replaces the favorite form.
+            self.editing = None;
+            self.confirm_delete = false;
+            self.error = None;
+        }
+        ui.add_space(14.0);
         ui.horizontal(|ui| {
             let heading = theme::section_label(ui, "Favoriten");
             if let Some(path) = self.directory.path() {
@@ -411,7 +477,7 @@ impl App {
                 theme::pill(ui, &count.to_string(), p.weak);
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let fresh = self.editing.is_none() && self.form == Server::default();
+                let fresh = self.editing.is_none() && self.form == Server::default() && self.account.selected().is_none();
                 let new = theme::Button::new("+ Neu", Kind::Ghost)
                     .small()
                     .enabled(!fresh)
@@ -973,14 +1039,14 @@ fn option_combo<T: Copy + PartialEq + 'static>(
 }
 
 /// What a click on a favorite's card asked for.
-struct CardResponse {
-    select: bool,
-    connect: bool,
+pub(crate) struct CardResponse {
+    pub select: bool,
+    pub connect: bool,
 }
 
 /// One favorite: avatar with monogram, name and address, tags for settings
 /// that deviate from the defaults, and an arrow button that connects.
-fn favorite_card(ui: &mut egui::Ui, server: &Server, selected: bool) -> CardResponse {
+pub(crate) fn favorite_card(ui: &mut egui::Ui, server: &Server, selected: bool) -> CardResponse {
     let p = Palette::of(ui);
     let height = 60.0;
     let (rect, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::click());

@@ -727,6 +727,7 @@ mod tests {
         let connection = Connection::from_stream(
             std::net::TcpStream::connect(address).unwrap(),
             Some("test"),
+            None,
             PixelFormat::BGRX,
             || {},
         )

@@ -36,6 +36,7 @@ Version 0.2.5. Umgesetzt:
 - Windows ohne eingeschaltete Monitore: automatischer virtueller Bildschirm mit 2560 × 1440 (mit Treiber)
 - Erreichbarkeit: alternative Adressen, SSH-Anmeldung (auch FileVault-Entsperrung), Wake-on-LAN über ein Zugangsgerät
 - Selbst-Update aus den GitHub-Releases (macOS und Windows)
+- Konto mit Organisationen: Anmeldung mit GitHub oder Google an einem selbst betreibbaren Koordinationsserver, alle eigenen und geteilten Geräte im Viewer, Verbindung ohne VNC-Passwort über kurzlebige Tickets, siehe [Konto und Organisationen](#konto-und-organisationen)
 - Windows: Die heruntergeladene `VNC-Beach-Windows.exe` kopiert sich beim ersten Start nach `%LOCALAPPDATA%\Programs\vnc-beach\vnc-beach.exe`, legt im Startmenü „VNC Beach“ an und löscht den Download. Eine ältere Datei überschreibt keine neuere Installation.
 - iPad- und iPhone-App als Viewer, derzeit in der Testphase über TestFlight
 
@@ -49,6 +50,8 @@ Geprüft auf macOS und Windows 11 in beiden Richtungen: Verbindung, Passwort, Bi
 | `crates/beach-server` | Server: Bildschirmaufnahme (`xcap`), Eingaben (`enigo`), Zwischenablage (`arboard`) |
 | `crates/beach-viewer` | Viewer: Fenster und Eingaben (`eframe`/`egui`), Hintergrunddienst, Windows-Dienst, Updates |
 | `crates/beach-access` | Erreichbarkeit: SSH-Anmeldung, Wake-on-LAN, alternative Adressen |
+| `crates/beach-account` | Konto: API-Typen des Koordinationsservers, signierte Verbindungstickets |
+| `crates/beach-coord` | Koordinationsserver: Anmeldung, Organisationen, Geräte, Tickets (`axum`, SQLite) |
 | `crates/beach-mobile` | Client als C-Bibliothek für die iOS-App |
 | `apps/ios` | iPad- und iPhone-App (SwiftUI) |
 
@@ -229,6 +232,12 @@ Auf dem Mac läuft `--background` als Symbol in der Menüleiste, der Autostart i
 
 Die Strg+Alt+Entf-Taste in der Leiste schickt die Kombination an den Server. Auf dem Mac wird Cmd als Super/Meta gesendet und kommt auf einem Mac-Server wieder als Cmd an.
 
+### Konto und Organisationen
+
+Wie bei Tailscale: Einmal anmelden, und der Viewer zeigt unter *Konto* alle deine Geräte und die deiner Organisationen, mit Status und Adressen. Ein Doppelklick verbindet, ohne VNC-Passwort. Organisationsgeräte sehen alle Mitglieder; eingeladen wird per Link, verwaltet im Browser.
+
+Dafür gibt es den Koordinationsserver `beach-coord` in diesem Repository. Jeder kann ihn selbst betreiben (ein Programm oder Docker-Image, SQLite, Anmeldung mit GitHub und/oder Google). Er speichert Konten, Anmeldesitzungen, Organisationen, Einladungen und die Geräteliste (vollständig in der Doku unten); der Bildschirm läuft weiter direkt zwischen den Geräten über LAN oder Tailscale. Zugriff gibt ein 60 Sekunden gültiges, signiertes Ticket über einen eigenen RFB-Security-Type. Fremde VNC-Viewer melden sich wie bisher mit dem Passwort an. Einrichtung, Sicherheitsmodell und Grenzen: [`docs/coordination-server.md`](docs/coordination-server.md).
+
 ## Updates
 
 VNC Beach fragt beim Start die neueste Veröffentlichung auf GitHub ab (`releases/latest` von `realS3BI/vnc-beach`). Ist sie neuer, erscheint über dem Formular „VNC Beach X ist verfügbar“. „Jetzt aktualisieren“ lädt das Paket für das eigene System, ersetzt das installierte Programm, startet es neu und startet auch den Hintergrunddienst neu, falls er lief. Links unten stehen die installierte Version und „Nach Updates suchen“.
@@ -261,6 +270,7 @@ Klassisches VNC verschlüsselt den Bildschirminhalt nicht, und die VNC-Passwort-
 - nur im eigenen Netz verwenden oder über ein VPN wie Tailscale bzw. WireGuard
 - den Port nie direkt ins Internet freigeben
 - `--no-password` nur in vertrauenswürdigen Netzen
+- Das Konto ersetzt das Passwort für VNC-Beach-Viewer, nicht die Verschlüsselung: Wer den Koordinationsserver samt `ticket-key` kontrolliert, kann sich mit allen dort angemeldeten Geräten verbinden. Im Zweifel selbst betreiben.
 
 ## Roadmap
 

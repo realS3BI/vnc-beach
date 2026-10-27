@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use rfb::encoding;
-use rfb::handshake::{server_handshake, ServerInit};
+use rfb::handshake::{server_handshake_secure, ServerInit, ServerSecurity};
 use rfb::messages::{self, ClientMessage, Rect};
 use rfb::zrle::ZrleEncoder;
 use rfb::PixelFormat;
@@ -23,6 +23,8 @@ pub struct Context {
     pub clipboard: Arc<Clipboard>,
     pub input: Option<Input>,
     pub password: Option<String>,
+    /// Accepts VNC Beach account tickets next to the password.
+    pub tickets: Option<beach_account::ticket::Verifier>,
     pub file_transfer: bool,
     /// Root for file transfers; the server user's home directory if `None`.
     pub home: Option<std::path::PathBuf>,
@@ -46,7 +48,14 @@ pub fn run(stream: TcpStream, ctx: &Context) -> anyhow::Result<()> {
         name: ctx.name.clone(),
     };
     let mut handshake_stream = stream.try_clone()?;
-    server_handshake(&mut handshake_stream, ctx.password.as_deref(), &init).context("handshake")?;
+    let security = ServerSecurity {
+        password: ctx.password.as_deref(),
+        tickets: ctx.tickets.as_ref().map(|v| v as &dyn rfb::handshake::TicketVerifier),
+    };
+    let (_, _, grant) = server_handshake_secure(&mut handshake_stream, &security, &init).context("handshake")?;
+    if let Some(grant) = &grant {
+        log::info!("signed in with the account of {}", grant.user);
+    }
 
     let (tx, rx) = sync_channel(8);
     let shutdown = stream.try_clone()?;
@@ -75,6 +84,7 @@ pub fn run(stream: TcpStream, ctx: &Context) -> anyhow::Result<()> {
         layout: frame.layout.clone(),
         clipboard_seq: ctx.clipboard.seq(),
         files: None,
+        view_only: grant.is_some_and(|g| g.view_only),
     };
     let result = session.serve(ctx, rx);
     let _ = shutdown.shutdown(Shutdown::Both);
@@ -104,6 +114,8 @@ struct Session {
     layout: Arc<Layout>,
     clipboard_seq: u64,
     files: Option<crate::files::Session>,
+    /// The account ticket only allows watching.
+    view_only: bool,
 }
 
 /// Outstanding update requests, merged: a full request always wins over an
@@ -152,6 +164,11 @@ fn screens(layout: &Layout) -> Vec<messages::Screen> {
 }
 
 impl Session {
+    /// Keyboard and mouse, unless this viewer may only watch.
+    fn input<'a>(&self, ctx: &'a Context) -> Option<&'a Input> {
+        ctx.input.as_ref().filter(|_| !self.view_only)
+    }
+
     fn serve(
         &mut self,
         ctx: &Context,
@@ -202,7 +219,7 @@ impl Session {
                 self.desktop_size = encs.contains(&encoding::DESKTOP_SIZE);
                 self.extended_desktop_size = encs.contains(&encoding::EXTENDED_DESKTOP_SIZE);
                 self.layout_announced = false;
-                if ctx.file_transfer && encs.contains(&encoding::BEACH_FILE_TRANSFER) {
+                if ctx.file_transfer && !self.view_only && encs.contains(&encoding::BEACH_FILE_TRANSFER) {
                     if self.files.is_none() {
                         match crate::files::Session::home(ctx.home.as_deref()) {
                             Ok(files) => {
@@ -248,12 +265,12 @@ impl Session {
                 self.out.flush()?;
             }
             ClientMessage::KeyEvent { down, key } => {
-                if let Some(input) = &ctx.input {
+                if let Some(input) = self.input(ctx) {
                     input.send(Event::Key { down, keysym: key });
                 }
             }
             ClientMessage::PointerEvent { buttons, x, y } => {
-                if let Some(input) = &ctx.input {
+                if let Some(input) = self.input(ctx) {
                     input.send(Event::Pointer {
                         buttons,
                         x,
@@ -272,7 +289,7 @@ impl Session {
             }
             ClientMessage::ClientCutText(text) => {
                 log::debug!("viewer clipboard: {} chars", text.chars().count());
-                if ctx.input.is_some() {
+                if self.input(ctx).is_some() {
                     ctx.clipboard.set(text);
                 }
             }

@@ -75,6 +75,7 @@ fn main() -> anyhow::Result<()> {
         view_only: args.view_only,
         name: None,
         home: None,
+        tickets: None,
     })?;
     serve_forever()
 }

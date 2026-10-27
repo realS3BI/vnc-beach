@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rfb::encoding;
-use rfb::handshake::client_handshake_with_banner;
+use rfb::handshake::client_handshake_secure;
 use rfb::io::ReadExt;
 use rfb::messages::{self, ClientMessage, Rect, ServerMessage};
 use rfb::zrle::ZrleDecoder;
@@ -78,16 +78,26 @@ pub struct Connection {
 
 impl Connection {
     /// Continues on a socket already checked by the connection workflow.
+    /// With `account`, the server is asked for an account ticket first.
     pub fn from_stream(
         mut stream: TcpStream,
         password: Option<&str>,
+        account: Option<&crate::account::Target>,
         pf: PixelFormat,
         repaint: impl Fn() + Send + 'static,
     ) -> rfb::Result<Connection> {
         stream.set_nodelay(true)?;
         stream.set_write_timeout(Some(Duration::from_secs(15)))?;
         stream.set_read_timeout(Some(Duration::from_secs(15)))?;
-        let (init, banner) = client_handshake_with_banner(&mut stream, password)?;
+        let mut tickets = |device: &str, nonce: &[u8; rfb::handshake::TICKET_NONCE_LEN]| match account {
+            Some(target) => crate::account::ticket(target, device, nonce),
+            None => Err("not signed in".to_string()),
+        };
+        let source: Option<rfb::handshake::TicketSource> = match account {
+            Some(_) => Some(&mut tickets),
+            None => None,
+        };
+        let (init, banner) = client_handshake_secure(&mut stream, password, source)?;
         let remote = detect(&banner, &init.name);
         log::debug!("server {banner:?} {:?}: {remote:?}", init.name);
         stream.set_read_timeout(None)?;
