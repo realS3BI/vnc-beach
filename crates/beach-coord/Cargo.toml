@@ -8,8 +8,8 @@ description = "VNC Beach coordination server: accounts, organizations and their 
 [dependencies]
 anyhow = "1.0.104"
 axum = "0.8.9"
-beach-account = { version = "0.2.5", path = "../beach-account" }
-rfb = { version = "0.2.5", path = "../rfb" }
+beach-account = { version = "0.3.0", path = "../beach-account" }
+rfb = { version = "0.3.0", path = "../rfb" }
 clap = { version = "4.6.7", features = ["derive", "env"] }
 env_logger = "0.11.11"
 log = "0.4.34"

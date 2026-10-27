@@ -13,8 +13,8 @@ enigo = "0.6.1"
 env_logger = "0.11.11"
 gethostname = "1.1.0"
 log = "0.4.34"
-rfb = { version = "0.2.5", path = "../rfb" }
-beach-account = { version = "0.2.5", path = "../beach-account" }
+rfb = { version = "0.3.0", path = "../rfb" }
+beach-account = { version = "0.3.0", path = "../beach-account" }
 tempfile = "3.27"
 xcap = "0.9.8"
 
