@@ -7,7 +7,7 @@ description = "Shared connection preparation for VNC Beach clients"
 
 [dependencies]
 anyhow = "1"
-rfb = { version = "0.3.1", path = "../rfb" }
+rfb = { version = "0.3.2", path = "../rfb" }
 serde = { version = "1", features = ["derive"] }
 ssh2 = { version = "0.9.6", features = ["vendored-openssl", "openssl-on-win32"] }
 base64 = "0.22"
