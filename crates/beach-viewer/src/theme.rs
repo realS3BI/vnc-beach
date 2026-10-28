@@ -87,6 +87,15 @@ impl Palette {
         }
     }
 
+    /// The palette of the context's current theme, where no `Ui` exists yet.
+    pub fn for_context(ctx: &egui::Context) -> Palette {
+        if ctx.theme() == egui::Theme::Dark {
+            Palette::DARK
+        } else {
+            Palette::LIGHT
+        }
+    }
+
     /// A translucent wash of `color` for tinted backgrounds.
     pub fn tint(&self, color: Color32) -> Color32 {
         color.gamma_multiply(if self.dark { 0.16 } else { 0.11 })
@@ -209,7 +218,11 @@ fn style(style: &mut egui::Style, p: &Palette) {
 
 /// A rounded, outlined surface for a group of related things.
 pub fn card(ui: &egui::Ui) -> egui::Frame {
-    let p = Palette::of(ui);
+    card_in(&Palette::of(ui))
+}
+
+/// [`card`] for a palette picked without a `Ui`, e.g. a modal's frame.
+pub fn card_in(p: &Palette) -> egui::Frame {
     egui::Frame::new()
         .fill(p.card)
         .stroke(Stroke::new(1.0, p.card_stroke))
@@ -227,14 +240,37 @@ pub fn banner(ui: &egui::Ui, color: Color32) -> egui::Frame {
         .inner_margin(Margin::symmetric(14, 12))
 }
 
-/// Small upper-case caption above a group, like "FAVORITEN".
-pub fn section_label(ui: &mut egui::Ui, text: &str) -> Response {
+/// Heading of an overview section: the caption plus an optional count.
+pub fn section_header(ui: &mut egui::Ui, text: &str, count: Option<usize>) -> Response {
     let p = Palette::of(ui);
-    ui.label(
-        RichText::new(text.to_uppercase())
-            .font(semibold(11.0))
-            .color(p.weak),
-    )
+    let response = ui.label(RichText::new(text).font(bold(17.0)).color(p.text));
+    if let Some(count) = count.filter(|&n| n > 0) {
+        pill(ui, &count.to_string(), p.weak);
+    }
+    response
+}
+
+/// One tab of a tab row, like the sections of the settings window.
+pub fn tab(ui: &mut egui::Ui, text: &str, selected: bool) -> Response {
+    let p = Palette::of(ui);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), semibold(13.5), Color32::PLACEHOLDER);
+    let size = galley.size() + Vec2::new(24.0, 12.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    if ui.is_rect_visible(rect) {
+        let (fill, color) = if selected {
+            (p.tint(p.accent), p.accent)
+        } else if response.hovered() {
+            (p.button_hover, p.text)
+        } else {
+            (Color32::TRANSPARENT, p.weak)
+        };
+        ui.painter().rect_filled(rect, CornerRadius::same(8), fill);
+        ui.painter()
+            .galley(rect.center() - galley.size() / 2.0, galley, color);
+    }
+    response.on_hover_cursor(CursorIcon::PointingHand)
 }
 
 /// Caption above an input field.
@@ -410,11 +446,6 @@ impl<'a> Button<'a> {
             response
         }
     }
-}
-
-/// Convenience for the common cases.
-pub fn button(ui: &mut egui::Ui, text: &str, kind: Kind) -> Response {
-    Button::new(text, kind).show(ui)
 }
 
 /// The colour and monogram for a favorite's avatar, chosen by its name so

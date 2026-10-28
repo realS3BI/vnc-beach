@@ -141,6 +141,14 @@ pub fn save(config: &Config) -> io::Result<()> {
     save_to(config, &path)
 }
 
+/// Saves everything but the account link, which is taken from disk first:
+/// the background process and the account panel change it on their own,
+/// and a stale in-memory copy would drop the registration.
+pub fn save_keeping_device(config: &mut Config) -> io::Result<()> {
+    config.server.device = load().server.device;
+    save(config)
+}
+
 fn save_to(config: &Config, path: &Path) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;

@@ -28,8 +28,8 @@ Version 0.2.5. Umgesetzt:
 - Dateiübertragung zwischen Desktop-Viewer und VNC-Beach-Server: lokale Dateien ins VNC-Fenster ziehen, Serverdateien über „Dateien“ herunterladen
 - Auflösungswechsel während der Sitzung (DesktopSize)
 - Mehrere Bildschirme: Der Server teilt standardmäßig alle Bildschirme als einen virtuellen Schreibtisch (auch für fremde Viewer) und meldet die Anordnung per ExtendedDesktopSize; VNC-Beach-Viewer und iPad-App schalten in der Sitzung auf einen einzelnen Bildschirm um und fordern dann nur noch diesen Ausschnitt an
-- Viewer mit Verbindungsdialog; das Fenster passt sich an den entfernten Bildschirm an
-- Favoriten im Viewer: mehrere Rechner mit Name, Adresse und Passwort speichern, bearbeiten und per Doppelklick verbinden
+- Viewer mit Übersicht als Kartenraster (Favoriten, Kontogeräte, dieser Computer); jede Verbindung öffnet ein eigenes Fenster, das sich an den entfernten Bildschirm anpasst, und mehrere Sitzungen laufen nebeneinander
+- Favoriten im Viewer: mehrere Rechner mit Name, Adresse und Passwort speichern, bearbeiten und mit einem Klick verbinden
 - Einstellungen pro Verbindung (Farbtiefe, Nur ansehen, Darstellung, Zwischenablage, Vollbild, Fenstergröße) mit Standardwerten, die jeder Favorit einzeln überschreibt
 - Server im selben Programm als Hintergrunddienst mit Symbol im Infobereich bzw. in der Menüleiste, Autostart beim Anmelden und Status im Viewer (Windows und macOS)
 - Vor der Anmeldung erreichbar: Windows-Dienst (auch Sperrbildschirm und UAC), LaunchAgent am macOS-Anmeldefenster, Servermodus für den unbeaufsichtigten Mac
@@ -83,13 +83,15 @@ Das Passwort lässt sich auch über `VNC_BEACH_PASSWORD` setzen.
 ### Viewer
 
 ```sh
-./target/release/beach-viewer                       # Verbindungsdialog mit Favoriten
+./target/release/beach-viewer                       # Übersicht mit Favoriten
 ./target/release/beach-viewer --background          # Windows: nur Infobereich-Symbol und Server
 ```
 
-Adressen im Formular: `mac.local` (Port 5900), `192.168.1.20:1` (Display 1 = Port 5901), `192.168.1.20::5999` (Port explizit). Der VNC-Beach-Server lauscht standardmäßig auf 5901, also `rechner:1` eingeben.
+Adressen (im Feld oben in der Übersicht oder im Favoriten): `mac.local` (Port 5900), `192.168.1.20:1` (Display 1 = Port 5901), `192.168.1.20::5999` (Port explizit). Der VNC-Beach-Server lauscht standardmäßig auf 5901, also `rechner:1` eingeben.
 
-**Favoriten:** Links im Verbindungsdialog steht die Favoritenliste. Name, Adresse und Passwort rechts eingeben und „Als Favorit speichern" klicken; ein Klick auf einen Favoriten lädt ihn zum Bearbeiten ins Formular („Speichern", „Favorit löschen"), ein Doppelklick oder der Pfeil rechts in der Karte verbindet. Ab sechs Favoriten gibt es ein Suchfeld über der Liste. „Neu" leert das Formular für einen weiteren Favoriten.
+**Übersicht und Sitzungen:** Das Hauptfenster zeigt Favoriten und Kontogeräte als Karten, darunter „Dieser Computer“. Ein Klick auf eine Karte verbindet; jede Sitzung öffnet ein eigenes Fenster. Die Übersicht bleibt offen, eine Sitzung endet mit dem Schließen-Knopf ihres Fensters oder „Trennen“, und weitere Sitzungen lassen sich jederzeit dazu öffnen. Bricht eine Verbindung ab, nennt die Übersicht oben den Grund. Oben im Fenster verbindet das Adressfeld ohne Favorit; verlangt der Server ein Passwort, öffnet sich dafür das Favoritenformular.
+
+**Favoriten:** „+ Neu“ (macOS: Ablage > Neue Verbindung …, ⌘N) öffnet das Formular für Name, Adresse und Passwort; „Als Favorit speichern“ legt die Karte an. „Bearbeiten“ erscheint auf der Karte beim Darüberfahren, ein Rechtsklick bietet Verbinden, Bearbeiten und Löschen. Gelöscht wird erst nach einer Rückfrage. Ab acht Favoriten gibt es ein Suchfeld.
 
 #### Geräte über alternative Wege erreichen und vorbereiten
 
@@ -164,7 +166,7 @@ Swift/Rust-Verbindungsablauf im iPad-Simulator.
 
 Die Liste liegt als `servers.toml` unter `~/Library/Application Support/vnc-beach/` (macOS) bzw. `%APPDATA%\vnc-beach\` (Windows) und lässt sich auch von Hand bearbeiten. Passwörter stehen darin im Format von `vncpasswd` (DES mit festem Schlüssel, wie in `~/.vnc/passwd`). Das verhindert nur das Mitlesen auf einen Blick, ist aber keine Verschlüsselung: Wer die Datei hat, kann die Passwörter zurückrechnen.
 
-**Einstellungen pro Verbindung:** Unter dem Passwortfeld klappt „Einstellungen" auf. Jede Zeile steht auf „Standard: …" oder auf einem eigenen Wert, der nur für diesen Favoriten gilt. „Standardeinstellungen …" öffnet die Werte, die für alle Verbindungen gelten. Es gibt:
+**Einstellungen pro Verbindung:** Im Favoritenformular klappt „Einstellungen für diese Verbindung“ auf. Jede Zeile steht auf „Standard: …“ oder auf einem eigenen Wert, der nur für diesen Favoriten gilt. Die Werte für alle Verbindungen stehen im Fenster „Einstellungen“ (Knopf oben rechts in der Übersicht, macOS: VNC Beach > Einstellungen …, ⌘,) unter „Verbindungen“. Das Fenster hat außerdem die Bereiche „Dieser Computer“, „Konto“ und „Updates“. Es gibt:
 
 | Einstellung | Werte |
 | --- | --- |
@@ -196,7 +198,7 @@ Die Dateiübertragung verwendet eine ausgehandelte VNC-Beach-Erweiterung. Andere
 
 Der Server steckt im Viewer, auf Windows und auf dem Mac. `vnc-beach.exe --background` startet ohne Fenster: ein Symbol im Infobereich, dahinter der Server. Das Menü des Symbols zeigt den Stand („Server online, Port 5901, 1 Zuschauer"), öffnet den Viewer, hält den Server an oder startet ihn, schaltet „Beim Anmelden starten" und beendet den Dienst. Das Menü erscheint bei Links- wie Rechtsklick; „VNC Beach öffnen“ holt einen laufenden Viewer nach vorn, statt einen zweiten zu starten.
 
-Im Viewer zeigt links unten „Dieser Computer" denselben Stand samt Passwort. „Einstellungen …" setzt Passwort (beim ersten Start wird eines erzeugt), Port, Bildschirme (alle, nur der Hauptbildschirm oder ein bestimmter; `display = "all" | "primary" | 1` in `config.toml`), Bilder pro Sekunde, „Nur ansehen", ob der Server überhaupt läuft und ob der Hintergrunddienst beim Anmelden startet (Windows: Registry-Eintrag `HKCU\…\Run\VNC Beach`, macOS: LaunchAgent). Läuft kein Hintergrunddienst, bietet der Viewer an, ihn zu starten.
+In der Übersicht zeigt die Karte „Dieser Computer“ denselben Stand samt Passwort und Kontoverknüpfung. „Einstellungen …“ öffnet den gleichnamigen Bereich im Einstellungsfenster. Er setzt Passwort (beim ersten Start wird eines erzeugt), Port, Bildschirme (alle, nur der Hauptbildschirm oder ein bestimmter; `display = "all" | "primary" | 1` in `config.toml`), Bilder pro Sekunde, „Nur ansehen", ob der Server überhaupt läuft und ob der Hintergrunddienst beim Anmelden startet (Windows: Registry-Eintrag `HKCU\…\Run\VNC Beach`, macOS: LaunchAgent). Läuft kein Hintergrunddienst, bietet der Viewer an, ihn zu starten.
 
 Viewer und Hintergrunddienst sind getrennte Prozesse. Sie reden über einen Port auf `127.0.0.1`, den der Dienst in `%APPDATA%\vnc-beach\control.port` ablegt; die Server-Einstellungen liegen in `config.toml` unter `[server]`. Der Hintergrunddienst startet erst nach dem Anmelden, nicht schon am Anmeldebildschirm.
 
@@ -234,13 +236,13 @@ Die Strg+Alt+Entf-Taste in der Leiste schickt die Kombination an den Server. Auf
 
 ### Konto und Organisationen
 
-Wie bei Tailscale: Einmal anmelden, und der Viewer zeigt unter *Konto* alle deine Geräte und die deiner Organisationen, mit Status und Adressen. Ein Doppelklick verbindet, ohne VNC-Passwort. Organisationsgeräte sehen alle Mitglieder; eingeladen wird per Link, verwaltet im Browser.
+Wie bei Tailscale: Einmal anmelden, und der Viewer zeigt in der Übersicht unter *Konto* alle deine Geräte und die deiner Organisationen als Karten, mit Status und Adresse. Ein Klick verbindet, ohne VNC-Passwort. Anmelden, Abmelden und „Diesen Computer hinzufügen“ liegen im Einstellungsfenster unter „Konto“. Organisationsgeräte sehen alle Mitglieder; eingeladen wird per Link, verwaltet im Browser.
 
 Dafür gibt es den Koordinationsserver `beach-coord` in diesem Repository. Jeder kann ihn selbst betreiben (ein Programm oder Docker-Image, SQLite, Anmeldung mit GitHub und/oder Google). Er speichert Konten, Anmeldesitzungen, Organisationen, Einladungen und die Geräteliste (vollständig in der Doku unten); der Bildschirm läuft weiter direkt zwischen den Geräten über LAN oder Tailscale. Zugriff gibt ein 60 Sekunden gültiges, signiertes Ticket über einen eigenen RFB-Security-Type. Fremde VNC-Viewer melden sich wie bisher mit dem Passwort an. Einrichtung, Sicherheitsmodell und Grenzen: [`docs/coordination-server.md`](docs/coordination-server.md).
 
 ## Updates
 
-VNC Beach fragt beim Start die neueste Veröffentlichung auf GitHub ab (`releases/latest` von `realS3BI/vnc-beach`). Ist sie neuer, erscheint über dem Formular „VNC Beach X ist verfügbar“. „Jetzt aktualisieren“ lädt das Paket für das eigene System, ersetzt das installierte Programm, startet es neu und startet auch den Hintergrunddienst neu, falls er lief. Links unten stehen die installierte Version und „Nach Updates suchen“.
+VNC Beach fragt beim Start die neueste Veröffentlichung auf GitHub ab (`releases/latest` von `realS3BI/vnc-beach`). Ist sie neuer, erscheint oben in der Übersicht „VNC Beach X ist verfügbar“. „Jetzt aktualisieren“ lädt das Paket für das eigene System, ersetzt das installierte Programm, startet es neu und startet auch den Hintergrunddienst neu, falls er lief. Unten in der Übersicht stehen die installierte Version und „Nach Updates suchen“; dasselbe bietet das Einstellungsfenster unter „Updates“.
 
 - **macOS:** `VNC-Beach-macOS.zip` wird entpackt, die Signatur geprüft und `VNC Beach.app` an Ort und Stelle getauscht. Ein Build aus `target/` aktualisiert sich nicht selbst, er bietet nur die Download-Seite an.
 - **Windows:** `VNC-Beach-Windows.exe` ersetzt die laufende `vnc-beach.exe` (Windows erlaubt das Umbenennen eines laufenden Programms); die alte Datei wird beim nächsten Start gelöscht.

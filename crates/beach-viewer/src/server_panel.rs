@@ -5,7 +5,7 @@ use std::sync::mpsc::{channel, Receiver};
 use std::time::Duration;
 
 use beach_server::Display;
-use egui::{CornerRadius, Margin, RichText, Vec2};
+use egui::{CornerRadius, Margin, RichText};
 
 use crate::theme::{self, Kind, Palette};
 
@@ -23,6 +23,8 @@ pub struct ServerPanel {
     show_password: bool,
     /// "Dienst neu starten" was clicked.
     restart: bool,
+    /// The settings were saved and nothing changed since.
+    saved: bool,
     error: Option<String>,
     #[cfg(target_os = "macos")]
     mac_status: crate::mac_server::Status,
@@ -84,6 +86,7 @@ impl ServerPanel {
             displays: Vec::new(),
             show_password: false,
             restart: false,
+            saved: false,
             error: None,
             #[cfg(target_os = "macos")]
             mac_status: crate::mac_server::Status::default(),
@@ -268,105 +271,88 @@ impl ServerPanel {
         }
     }
 
-    /// The status block for the sidebar.
+    /// The content of the "Dieser Computer" card: status, account link,
+    /// password and start/stop.
     pub fn show(&mut self, ui: &mut egui::Ui, config: &Config) {
         self.poll();
         let p = Palette::of(ui);
-        theme::card(ui)
-            .inner_margin(Margin::symmetric(14, 12))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("Dieser Computer")
-                            .font(theme::semibold(14.0))
-                            .color(p.text),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if theme::Button::new("Einstellungen", Kind::Ghost)
-                            .small()
-                            .show(ui)
-                            .clicked()
-                        {
-                            self.draft = Some(config.server.clone());
-                            self.displays = beach_server::displays().unwrap_or_default();
-                            #[cfg(windows)]
-                            {
-                                self.driver_installed = crate::display_driver::installed();
-                            }
-                        }
+        self.status_rows(ui);
+        if let Some(link) = &config.server.device {
+            ui.label(
+                RichText::new(format!("Im Konto als „{}“ ({}).", link.name, link.owner))
+                    .size(12.5)
+                    .color(p.weak),
+            );
+        }
+        let password = self
+            .status
+            .as_ref()
+            .map(|s| s.password.clone())
+            .unwrap_or_else(|| config.server.password.clone());
+        if !password.is_empty() {
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Passwort").color(p.weak));
+                let shown = if self.show_password {
+                    password.as_str()
+                } else {
+                    "••••••••"
+                };
+                egui::Frame::new()
+                    .fill(p.input)
+                    .corner_radius(CornerRadius::same(6))
+                    .inner_margin(Margin::symmetric(8, 3))
+                    .show(ui, |ui| {
+                        ui.monospace(shown);
                     });
-                });
-                ui.add_space(2.0);
-                self.status_rows(ui);
-                let password = self
-                    .status
-                    .as_ref()
-                    .map(|s| s.password.clone())
-                    .unwrap_or_else(|| config.server.password.clone());
-                if !password.is_empty() {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("Passwort").color(p.weak));
-                        let shown = if self.show_password {
-                            password.as_str()
-                        } else {
-                            "••••••••"
-                        };
-                        egui::Frame::new()
-                            .fill(p.input)
-                            .corner_radius(CornerRadius::same(6))
-                            .inner_margin(Margin::symmetric(8, 3))
-                            .show(ui, |ui| {
-                                ui.monospace(shown);
-                            });
-                        let eye = if self.show_password {
-                            "Verbergen"
-                        } else {
-                            "Anzeigen"
-                        };
-                        if theme::Button::new(eye, Kind::Ghost).small().show(ui).clicked() {
-                            self.show_password = !self.show_password;
-                        }
-                    });
-                }
-                ui.add_space(4.0);
-                ui.horizontal(|ui| match &self.status {
-                    Some(s) if s.enabled => {
-                        if theme::Button::new("Server anhalten", Kind::Secondary)
-                            .small()
-                            .show(ui)
-                            .clicked()
-                        {
-                            self.command(Command::Stop);
-                        }
-                    }
-                    Some(_) => {
-                        if theme::Button::new("Server starten", Kind::Secondary)
-                            .small()
-                            .show(ui)
-                            .clicked()
-                        {
-                            self.command(Command::Start);
-                        }
-                    }
-                    None => {
-                        if theme::Button::new("Hintergrunddienst starten", Kind::Secondary)
-                            .small()
-                            .show(ui)
-                            .clicked()
-                        {
-                            self.error = Self::start_background().err();
-                        }
-                    }
-                });
-                if std::mem::take(&mut self.restart) {
-                    self.restart_background();
-                }
-                if let Some(e) = &self.error {
-                    ui.add_space(2.0);
-                    ui.label(RichText::new(e).color(theme::CORAL).size(12.5));
+                let eye = if self.show_password {
+                    "Verbergen"
+                } else {
+                    "Anzeigen"
+                };
+                if theme::Button::new(eye, Kind::Ghost).small().show(ui).clicked() {
+                    self.show_password = !self.show_password;
                 }
             });
+        }
+        ui.add_space(6.0);
+        ui.horizontal(|ui| match &self.status {
+            Some(s) if s.enabled => {
+                if theme::Button::new("Server anhalten", Kind::Secondary)
+                    .small()
+                    .show(ui)
+                    .on_hover_text("Zuschauer werden getrennt; der Hintergrunddienst läuft weiter.")
+                    .clicked()
+                {
+                    self.command(Command::Stop);
+                }
+            }
+            Some(_) => {
+                if theme::Button::new("Server starten", Kind::Secondary)
+                    .small()
+                    .show(ui)
+                    .clicked()
+                {
+                    self.command(Command::Start);
+                }
+            }
+            None => {
+                if theme::Button::new("Hintergrunddienst starten", Kind::Secondary)
+                    .small()
+                    .show(ui)
+                    .clicked()
+                {
+                    self.error = Self::start_background().err();
+                }
+            }
+        });
+        if std::mem::take(&mut self.restart) {
+            self.restart_background();
+        }
+        if let Some(e) = &self.error {
+            ui.add_space(2.0);
+            ui.label(RichText::new(e).color(theme::CORAL).size(12.5));
+        }
     }
 
     /// Status dot and line, plus warnings about missing macOS permissions.
@@ -459,8 +445,24 @@ impl ServerPanel {
         }
     }
 
-    /// The settings window. Returns true if the config was changed and saved.
-    pub fn window(&mut self, ctx: &egui::Context, config: &mut Config) -> bool {
+    /// Starts the settings tab's draft from the saved configuration.
+    pub fn begin_settings(&mut self, config: &Config) {
+        self.draft = Some(config.server.clone());
+        self.displays = beach_server::displays().unwrap_or_default();
+        #[cfg(windows)]
+        {
+            self.driver_installed = crate::display_driver::installed();
+        }
+        self.saved = false;
+    }
+
+    pub fn end_settings(&mut self) {
+        self.draft = None;
+    }
+
+    /// The "Dieser Computer" tab of the settings window. Returns true when
+    /// the configuration was saved.
+    pub fn settings(&mut self, ui: &mut egui::Ui, config: &mut Config) -> bool {
         #[cfg(target_os = "macos")]
         if self.mac_finished {
             self.mac_finished = false;
@@ -474,132 +476,142 @@ impl ServerPanel {
         let Some(mut draft) = self.draft.take() else {
             return false;
         };
-        let mut open = true;
-        let mut save = false;
-        let mut cancel = false;
-        egui::Window::new("Server-Einstellungen")
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
-            .show(ctx, |ui| {
-                ui.set_width(380.0);
-                egui::ScrollArea::vertical()
-                    .max_height((ctx.content_rect().height() - 150.0).max(200.0))
-                    .show(ui, |ui| {
-                ui.checkbox(&mut draft.enabled, "Bildschirm dieses Computers freigeben");
-                ui.add_enabled(
-                    autostart::supported(),
-                    egui::Checkbox::new(&mut draft.autostart, "Hintergrunddienst beim Anmelden starten"),
+        // The account panel may have linked this computer in the meantime.
+        draft.device = config.server.device.clone();
+        let p = Palette::of(ui);
+        ui.checkbox(&mut draft.enabled, "Bildschirm dieses Computers freigeben");
+        ui.add_enabled(
+            autostart::supported(),
+            egui::Checkbox::new(&mut draft.autostart, "Hintergrunddienst beim Anmelden starten"),
+        );
+        if service::supported() {
+            if cfg!(windows) {
+                ui.checkbox(
+                    &mut draft.service,
+                    "Auch im Sperrbildschirm und vor der Anmeldung erreichbar",
                 );
-                if service::supported() {
-                    if cfg!(windows) {
-                        ui.checkbox(
-                            &mut draft.service,
-                            "Auch im Sperrbildschirm und vor der Anmeldung erreichbar",
-                        );
-                        ui.weak(
-                            "Richtet einen Windows-Dienst ein, der mit Windows startet, und stellt \
-                             Tailscale so ein, dass es ohne Anmeldung läuft. Windows fragt dafür nach \
-                             Administratorrechten.",
-                        );
-                    } else {
-                        ui.checkbox(&mut draft.service, "Auch am Anmeldefenster erreichbar");
-                        ui.weak(
-                            "Startet den Server auch am Anmeldefenster des Macs. macOS fragt dafür einmal \
-                             nach dem Passwort eines Administrators.",
-                        );
-                    }
-                }
-                #[cfg(target_os = "macos")]
-                self.mac_server_row(ui);
-                #[cfg(windows)]
-                self.virtual_display_row(ui);
-                ui.add_space(8.0);
-                egui::Grid::new("server-settings")
-                    .num_columns(2)
-                    .spacing([12.0, 6.0])
-                    .show(ui, |ui| {
-                        ui.label("Port");
-                        ui.add(egui::DragValue::new(&mut draft.port).range(1..=65535));
-                        ui.end_row();
-                        ui.label("Passwort");
-                        ui.horizontal(|ui| {
-                            ui.add(egui::TextEdit::singleline(&mut draft.password).desired_width(140.0));
-                            if ui.small_button("Neu erzeugen").clicked() {
-                                draft.password = beach_server::random_password();
-                            }
-                        });
-                        ui.end_row();
-                        ui.label("Bildschirme");
-                        let name = |d: Display| match d {
-                            Display::All => "Alle Bildschirme".to_string(),
-                            Display::Primary => "Nur Hauptbildschirm".to_string(),
-                            Display::Index(i) => self
-                                .displays
-                                .get(i)
-                                .cloned()
-                                .unwrap_or_else(|| format!("Bildschirm {i}")),
-                        };
-                        egui::ComboBox::from_id_salt("display")
-                            .selected_text(name(draft.display))
-                            .width(220.0)
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut draft.display, Display::All, name(Display::All));
-                                ui.selectable_value(
-                                    &mut draft.display,
-                                    Display::Primary,
-                                    name(Display::Primary),
-                                );
-                                for i in 0..self.displays.len() {
-                                    ui.selectable_value(
-                                        &mut draft.display,
-                                        Display::Index(i),
-                                        name(Display::Index(i)),
-                                    );
-                                }
-                            });
-                        ui.end_row();
-                        ui.label("Bilder pro Sekunde");
-                        ui.add(egui::DragValue::new(&mut draft.fps).range(1..=60));
-                        ui.end_row();
-                        ui.label("Eingabe");
-                        ui.checkbox(&mut draft.view_only, "Nur ansehen, keine Eingaben annehmen");
-                        ui.end_row();
-                    });
-                ui.add_space(6.0);
-                ui.weak("Das Passwort gilt nur für die ersten 8 Zeichen (VNC-Standard).");
                 ui.weak(
-                    "Bei „Alle Bildschirme“ sehen Zuschauer alle Bildschirme nebeneinander und können im \
-                     Viewer auf einen einzelnen umschalten.",
+                    "Richtet einen Windows-Dienst ein, der mit Windows startet, und stellt \
+                     Tailscale so ein, dass es ohne Anmeldung läuft. Windows fragt dafür nach \
+                     Administratorrechten.",
                 );
-                if cfg!(target_os = "macos") {
-                    ui.weak(
-                        "Port 5900 gehört meist der Bildschirmfreigabe von macOS, deshalb nimmt \
-                         VNC Beach 5901. Der Hintergrunddienst braucht Bildschirmaufnahme und Bedienungshilfen \
-                         unter Datenschutz & Sicherheit.",
-                    );
-                }
-                });
-                ui.add_space(10.0);
+            } else {
+                ui.checkbox(&mut draft.service, "Auch am Anmeldefenster erreichbar");
+                ui.weak(
+                    "Startet den Server auch am Anmeldefenster des Macs. macOS fragt dafür einmal \
+                     nach dem Passwort eines Administrators.",
+                );
+            }
+        }
+        #[cfg(target_os = "macos")]
+        self.mac_server_row(ui);
+        #[cfg(windows)]
+        self.virtual_display_row(ui);
+        ui.add_space(10.0);
+        egui::Grid::new("server-settings")
+            .num_columns(2)
+            .spacing([12.0, 8.0])
+            .show(ui, |ui| {
+                ui.label("Port");
+                ui.add(egui::DragValue::new(&mut draft.port).range(1..=65535));
+                ui.end_row();
+                ui.label("Passwort");
                 ui.horizontal(|ui| {
-                    #[cfg(target_os = "macos")]
-                    let ready = self.mac_setup.is_none();
-                    #[cfg(not(target_os = "macos"))]
-                    let ready = true;
-                    save = ui.add_enabled(ready, egui::Button::new("Speichern")).clicked();
-                    cancel = ui.button("Abbrechen").clicked();
+                    ui.add(egui::TextEdit::singleline(&mut draft.password).desired_width(140.0));
+                    if theme::Button::new("Neu erzeugen", Kind::Ghost).small().show(ui).clicked() {
+                        draft.password = beach_server::random_password();
+                    }
                 });
+                ui.end_row();
+                ui.label("Bildschirme");
+                let name = |d: Display| match d {
+                    Display::All => "Alle Bildschirme".to_string(),
+                    Display::Primary => "Nur Hauptbildschirm".to_string(),
+                    Display::Index(i) => self
+                        .displays
+                        .get(i)
+                        .cloned()
+                        .unwrap_or_else(|| format!("Bildschirm {i}")),
+                };
+                egui::ComboBox::from_id_salt("display")
+                    .selected_text(name(draft.display))
+                    .width(220.0)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut draft.display, Display::All, name(Display::All));
+                        ui.selectable_value(
+                            &mut draft.display,
+                            Display::Primary,
+                            name(Display::Primary),
+                        );
+                        for i in 0..self.displays.len() {
+                            ui.selectable_value(
+                                &mut draft.display,
+                                Display::Index(i),
+                                name(Display::Index(i)),
+                            );
+                        }
+                    });
+                ui.end_row();
+                ui.label("Bilder pro Sekunde");
+                ui.add(egui::DragValue::new(&mut draft.fps).range(1..=60));
+                ui.end_row();
+                ui.label("Eingabe");
+                ui.checkbox(&mut draft.view_only, "Nur ansehen, keine Eingaben annehmen");
+                ui.end_row();
             });
+        ui.add_space(8.0);
+        ui.label(
+            RichText::new("Das Passwort gilt nur für die ersten 8 Zeichen (VNC-Standard).")
+                .size(12.5)
+                .color(p.weak),
+        );
+        ui.label(
+            RichText::new(
+                "Bei „Alle Bildschirme“ sehen Zuschauer alle Bildschirme nebeneinander und können im \
+                 Viewer auf einen einzelnen umschalten.",
+            )
+            .size(12.5)
+            .color(p.weak),
+        );
+        if cfg!(target_os = "macos") {
+            ui.label(
+                RichText::new(
+                    "Port 5900 gehört meist der Bildschirmfreigabe von macOS, deshalb nimmt \
+                     VNC Beach 5901. Der Hintergrunddienst braucht Bildschirmaufnahme und Bedienungshilfen \
+                     unter Datenschutz & Sicherheit.",
+                )
+                .size(12.5)
+                .color(p.weak),
+            );
+        }
+        ui.add_space(14.0);
+        #[cfg(target_os = "macos")]
+        let ready = self.mac_setup.is_none();
+        #[cfg(not(target_os = "macos"))]
+        let ready = true;
+        let modified = draft != config.server;
+        let mut save = false;
+        let mut discard = false;
+        ui.horizontal(|ui| {
+            save = theme::Button::new("Speichern", Kind::Primary)
+                .enabled(ready && modified)
+                .show(ui)
+                .clicked();
+            discard = theme::Button::new("Verwerfen", Kind::Ghost)
+                .enabled(modified)
+                .show(ui)
+                .clicked();
+            if self.saved && !modified {
+                ui.label(RichText::new("Gespeichert").color(theme::GREEN));
+            }
+        });
         if save {
             draft.password = draft.password.chars().take(8).collect();
             if draft.password.is_empty() {
                 draft.password = beach_server::random_password();
             }
-            // Linked to the account from the sidebar in the meantime.
-            draft.device = config.server.device.clone();
             config.server = draft;
-            self.error = config::save(config)
+            self.error = config::save_keeping_device(config)
                 .map_err(|e| format!("Speichern fehlgeschlagen: {e}"))
                 .err();
             if autostart::supported() && autostart::enabled() != config.server.autostart {
@@ -615,10 +627,19 @@ impl ServerPanel {
             } else if config.server.enabled {
                 self.error = Self::start_background().err();
             }
+            self.saved = self.error.is_none();
+            self.draft = Some(config.server.clone());
+            if let Some(e) = &self.error {
+                ui.label(RichText::new(e).color(theme::CORAL).size(12.5));
+            }
             true
         } else {
-            if open && !cancel {
-                self.draft = Some(draft);
+            if let Some(e) = &self.error {
+                ui.label(RichText::new(e).color(theme::CORAL).size(12.5));
+            }
+            self.draft = Some(if discard { config.server.clone() } else { draft });
+            if discard {
+                self.saved = false;
             }
             false
         }

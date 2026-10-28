@@ -568,6 +568,8 @@ impl Tray {
 impl ApplicationHandler for Tray {
     fn resumed(&mut self, _event_loop: &ActiveEventLoop) {
         if self.icon.is_none() {
+            #[cfg(target_os = "macos")]
+            reopen::install();
             if let Err(e) = self.build() {
                 log::error!("tray icon: {e:#}");
                 self.quit.store(true, Ordering::Release);
@@ -604,37 +606,98 @@ fn open_viewer() {
             return;
         }
     };
-    // `open` on the app bundle brings a running viewer to the front instead
-    // of starting a second one. Without a viewer it would only "activate"
-    // this background process, so that case starts the executable directly.
+    // A running viewer comes to the front instead of starting a second one.
+    // `open` on the bundle can't do that: LaunchServices may pick this
+    // background process of the same bundle and only "activate" it.
     #[cfg(target_os = "macos")]
-    if let Some(bundle) = exe
-        .ancestors()
-        .nth(3)
-        .filter(|p| p.extension().is_some_and(|ext| ext == "app"))
-    {
-        if viewer_running(&exe) {
-            match std::process::Command::new("open").arg(bundle).spawn() {
-                Ok(_) => return,
-                Err(e) => log::warn!("open {}: {e}", bundle.display()),
-            }
+    if let Some(pid) = viewer_pid(&exe) {
+        if reopen::activate(pid) {
+            return;
         }
+        log::warn!("cannot bring viewer {pid} to the front");
     }
     if let Err(e) = std::process::Command::new(exe).spawn() {
         log::warn!("cannot start the viewer: {e}");
     }
 }
 
-/// Whether a viewer process of this executable (one without `--background`)
-/// is running, according to `ps`.
+/// The process ID of a running viewer of this executable (one without
+/// `--background`), according to `ps`.
 #[cfg(target_os = "macos")]
-fn viewer_running(exe: &std::path::Path) -> bool {
-    let Ok(out) = std::process::Command::new("ps").args(["-axo", "args="]).output() else {
-        return false;
-    };
+fn viewer_pid(exe: &std::path::Path) -> Option<i32> {
+    let out = std::process::Command::new("ps").args(["-axo", "pid=,args="]).output().ok()?;
     let exe = exe.to_string_lossy();
-    String::from_utf8_lossy(&out.stdout).lines().any(|line| {
-        let line = line.trim_end();
-        (line == exe || line.starts_with(&format!("{exe} "))) && !line.contains("--background")
+    String::from_utf8_lossy(&out.stdout).lines().find_map(|line| {
+        let (pid, args) = line.trim().split_once(' ')?;
+        let args = args.trim();
+        let ours = args == exe || args.starts_with(&format!("{exe} "));
+        (ours && !args.contains("--background")).then(|| pid.parse().ok()).flatten()
     })
+}
+
+/// Clicking the app in the Dock, Finder or Launchpad while only this
+/// background process runs doesn't start the viewer: LaunchServices sees the
+/// bundle running and sends this process a "reopen" Apple Event instead,
+/// which winit ignores. This handler opens the viewer for it.
+#[cfg(target_os = "macos")]
+mod reopen {
+    use objc2::rc::Retained;
+    use objc2::runtime::{AnyClass, AnyObject, NSObject};
+    use objc2::{define_class, msg_send, sel, AllocAnyThread};
+
+    /// `kCoreEventClass`, `kAEReopenApplication`.
+    const CORE_EVENT_CLASS: u32 = u32::from_be_bytes(*b"aevt");
+    const REOPEN_APPLICATION: u32 = u32::from_be_bytes(*b"rapp");
+
+    define_class!(
+        #[unsafe(super(NSObject))]
+        #[name = "VNCBeachReopenHandler"]
+        struct Handler;
+
+        impl Handler {
+            #[unsafe(method(handleReopen:withReplyEvent:))]
+            fn handle_reopen(&self, _event: *mut AnyObject, _reply: *mut AnyObject) {
+                log::info!("app reopened, opening the viewer");
+                super::open_viewer();
+            }
+        }
+    );
+
+    /// Replaces AppKit's reopen handler; call after the app finished
+    /// launching, which installs that one.
+    pub fn install() {
+        let Some(manager_class) = AnyClass::get(c"NSAppleEventManager") else {
+            return;
+        };
+        let handler: Retained<Handler> = unsafe { msg_send![Handler::alloc(), init] };
+        unsafe {
+            let manager: *mut AnyObject = msg_send![manager_class, sharedAppleEventManager];
+            let _: () = msg_send![
+                manager,
+                setEventHandler: &*handler,
+                andSelector: sel!(handleReopen:withReplyEvent:),
+                forEventClass: CORE_EVENT_CLASS,
+                andEventID: REOPEN_APPLICATION
+            ];
+        }
+        // The manager doesn't retain its handlers.
+        std::mem::forget(handler);
+    }
+
+    /// Brings the app with process ID `pid` to the front.
+    pub fn activate(pid: i32) -> bool {
+        let Some(class) = AnyClass::get(c"NSRunningApplication") else {
+            return false;
+        };
+        unsafe {
+            let app: *mut AnyObject = msg_send![class, runningApplicationWithProcessIdentifier: pid];
+            if app.is_null() {
+                return false;
+            }
+            // NSApplicationActivateAllWindows | NSApplicationActivateIgnoringOtherApps
+            let options: usize = 1 | 2;
+            let ok: bool = msg_send![app, activateWithOptions: options];
+            ok
+        }
+    }
 }

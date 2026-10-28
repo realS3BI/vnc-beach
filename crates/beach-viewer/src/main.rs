@@ -8,6 +8,7 @@ mod account_ui;
 mod app;
 mod autostart;
 mod background;
+mod cards;
 mod client;
 mod clipboard;
 mod config;
@@ -21,6 +22,9 @@ mod install;
 mod keys;
 #[cfg(target_os = "macos")]
 mod mac_server;
+#[cfg(target_os = "macos")]
+mod menu;
+mod remote;
 mod server_panel;
 mod servers;
 mod service;
@@ -117,8 +121,8 @@ fn main() {
             .with_title("VNC Beach")
             .with_drag_and_drop(true)
             .with_icon(std::sync::Arc::new(icon::window()))
-            .with_inner_size([1100.0, 700.0])
-            .with_min_inner_size([480.0, 320.0]),
+            .with_inner_size([960.0, 680.0])
+            .with_min_inner_size([520.0, 400.0]),
         ..Default::default()
     };
     let result = eframe::run_native(

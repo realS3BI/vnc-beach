@@ -38,6 +38,9 @@ pub fn routes() -> Router<Shared> {
         .route("/devices/{id}/delete", post(delete_device))
         .route("/invite/{token}", get(invite_page).post(accept_invite))
         .route("/style.css", get(style))
+        .route("/favicon.svg", get(favicon_svg))
+        .route("/favicon.ico", get(favicon_ico))
+        .route("/apple-touch-icon.png", get(apple_touch_icon))
 }
 
 // Errors
@@ -930,7 +933,9 @@ fn page(title: &str, user: Option<&User>, body: &str) -> String {
     format!(
         r#"<!doctype html>
 <html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{} · VNC Beach</title><link rel="stylesheet" href="/style.css"></head>
+<title>{} · VNC Beach</title><link rel="stylesheet" href="/style.css">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png"></head>
 <body><header><a class="brand" href="/">VNC Beach <span>Konto</span></a>{account}</header>
 <main>{body}</main>
 <footer>VNC Beach ist Open Source · <a href="{REPO}">Quellcode</a> · diesen Server kann jeder selbst betreiben</footer>
@@ -941,6 +946,24 @@ fn page(title: &str, user: Option<&User>, body: &str) -> String {
 
 async fn style() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], STYLE)
+}
+
+// The same icons as the landing page in docs/.
+const CACHE_ICON: (header::HeaderName, &str) = (header::CACHE_CONTROL, "public, max-age=86400");
+
+async fn favicon_svg() -> impl IntoResponse {
+    let svg = include_str!("../../../docs/favicon.svg");
+    ([(header::CONTENT_TYPE, "image/svg+xml"), CACHE_ICON], svg)
+}
+
+async fn favicon_ico() -> impl IntoResponse {
+    let ico = include_bytes!("../../../docs/favicon.ico");
+    ([(header::CONTENT_TYPE, "image/x-icon"), CACHE_ICON], ico)
+}
+
+async fn apple_touch_icon() -> impl IntoResponse {
+    let png = include_bytes!("../../../docs/apple-touch-icon.png");
+    ([(header::CONTENT_TYPE, "image/png"), CACHE_ICON], png)
 }
 
 const STYLE: &str = r#"

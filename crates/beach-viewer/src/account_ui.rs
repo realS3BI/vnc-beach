@@ -1,6 +1,6 @@
-//! The "Konto" section of the sidebar: signing in to a coordination
-//! server, the account's devices grouped by owner, and adding this computer
-//! to the account.
+//! The account: signing in to a coordination server and adding this
+//! computer (the "Konto" tab of the settings window), and the account's
+//! devices, which the overview shows as cards.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver};
@@ -31,8 +31,6 @@ pub struct AccountPanel {
     refreshed: Option<Instant>,
     me: Option<Me>,
     devices: Vec<Device>,
-    /// Device shown in the main area.
-    selected: Option<String>,
     error: Option<String>,
     add: Option<AddDialog>,
     link_task: Option<Receiver<Result<Option<DeviceLink>, account::Error>>>,
@@ -54,7 +52,6 @@ impl AccountPanel {
             refreshed: None,
             me: None,
             devices: Vec::new(),
-            selected: None,
             error: None,
             add: None,
             link_task: None,
@@ -62,17 +59,28 @@ impl AccountPanel {
         }
     }
 
-    /// The selected account device, for the main area.
-    pub fn selected(&self) -> Option<&Device> {
-        let id = self.selected.as_ref()?;
-        self.devices.iter().find(|d| &d.id == id)
+    /// The account's devices, as last fetched.
+    pub fn devices(&self) -> &[Device] {
+        &self.devices
     }
 
-    pub fn deselect(&mut self) {
-        self.selected = None;
+    /// The first fetch after signing in is still running.
+    pub fn loading(&self) -> bool {
+        self.me.is_none() && self.refresh.is_some()
     }
 
-    fn poll(&mut self, ctx: &egui::Context, config: &mut Config) {
+    /// The account answered at least once.
+    pub fn loaded(&self) -> bool {
+        self.me.is_some()
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+
+    /// Takes the results of the sign-in, the device refresh and the link
+    /// task, and starts the next refresh. Call every frame.
+    pub fn poll(&mut self, ctx: &egui::Context, config: &mut Config) {
         if let Some((rx, _)) = &self.login {
             if let Ok(result) = rx.try_recv() {
                 self.login = None;
@@ -114,7 +122,10 @@ impl AccountPanel {
                 match result {
                     Ok(link) => {
                         config.server.device = link;
-                        self.save(config);
+                        // This is the one save that must write the link itself.
+                        if let Err(e) = config::save(config) {
+                            self.error = Some(format!("Speichern fehlgeschlagen: {e}"));
+                        }
                         control::call(Command::Reload);
                         self.add = None;
                         self.refreshed = None;
@@ -140,8 +151,8 @@ impl AccountPanel {
         }
     }
 
-    fn save(&mut self, config: &Config) {
-        if let Err(e) = config::save(config) {
+    fn save(&mut self, config: &mut Config) {
+        if let Err(e) = config::save_keeping_device(config) {
             self.error = Some(format!("Speichern fehlgeschlagen: {e}"));
         }
     }
@@ -184,29 +195,30 @@ impl AccountPanel {
         self.save(config);
         self.me = None;
         self.devices.clear();
-        self.selected = None;
         self.refreshed = None;
     }
 
-    /// The sidebar section. Returns a device to connect to.
-    pub fn show(&mut self, ui: &mut egui::Ui, config: &mut Config) -> Option<Device> {
+    /// The "Konto" tab of the settings window.
+    pub fn settings(&mut self, ui: &mut egui::Ui, config: &mut Config) {
         let ctx = ui.ctx().clone();
-        self.poll(&ctx, config);
         let p = Palette::of(ui);
-        let mut connect = None;
-        if !config.account.signed_in() {
-            self.signed_out(ui, &ctx);
-            return None;
-        }
-        ui.horizontal(|ui| {
-            theme::section_label(ui, "Konto").on_hover_text(format!(
-                "Angemeldet als {} ({}) bei {}",
-                config.account.name, config.account.login, config.account.url
-            ));
-            if !self.devices.is_empty() {
-                theme::pill(ui, &self.devices.len().to_string(), p.weak);
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        if config.account.signed_in() {
+            ui.label(RichText::new(&config.account.name).font(theme::semibold(15.0)).color(p.text));
+            ui.label(
+                RichText::new(format!("{} · {}", config.account.login, config.account.url))
+                    .size(12.5)
+                    .color(p.weak),
+            );
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if theme::Button::new("Im Browser verwalten", Kind::Secondary)
+                    .small()
+                    .show(ui)
+                    .on_hover_text("Organisationen, Mitglieder und Einladungen")
+                    .clicked()
+                {
+                    ctx.open_url(egui::OpenUrl::new_tab(&config.account.url));
+                }
                 if theme::Button::new("Abmelden", Kind::Ghost)
                     .small()
                     .show(ui)
@@ -214,195 +226,133 @@ impl AccountPanel {
                 {
                     self.sign_out(config, true);
                 }
-                if theme::Button::new("Verwalten", Kind::Ghost)
-                    .small()
-                    .show(ui)
-                    .on_hover_text("Organisationen, Mitglieder und Einladungen im Browser verwalten")
-                    .clicked()
-                {
-                    ctx.open_url(egui::OpenUrl::new_tab(&config.account.url));
-                }
             });
-        });
-        if !config.account.signed_in() {
-            return None;
+        } else {
+            self.signed_out(ui, &ctx);
         }
-        ui.label(RichText::new(&config.account.name).size(12.0).color(p.weak));
-        ui.add_space(6.0);
         if let Some(e) = &self.error {
-            ui.label(RichText::new(e).size(12.0).color(theme::CORAL));
-            ui.add_space(4.0);
+            ui.add_space(6.0);
+            ui.label(RichText::new(e).size(12.5).color(theme::CORAL));
         }
-        if self.me.is_none() && self.refresh.is_some() {
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.weak("Geräte werden geladen …");
-            });
-        } else if self.devices.is_empty() && self.me.is_some() {
-            ui.label(
-                RichText::new("Noch keine Geräte im Konto. Füge unten diesen Computer hinzu oder installiere VNC Beach auf einem anderen.")
-                    .size(12.5)
-                    .color(p.weak),
-            );
-        }
-        egui::ScrollArea::vertical()
-            .id_salt("account-devices")
-            .max_height(260.0)
-            .show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 6.0;
-                let mut group: Option<Option<&str>> = None;
-                for device in &self.devices {
-                    let owner = device.org.as_ref().map(|o| o.name.as_str());
-                    if group != Some(owner) {
-                        group = Some(owner);
-                        ui.add_space(2.0);
-                        ui.label(
-                            RichText::new(owner.unwrap_or("Persönlich"))
-                                .font(theme::semibold(11.5))
-                                .color(p.weak),
-                        );
-                    }
-                    let card = crate::app::favorite_card(
-                        ui,
-                        &card_server(device),
-                        self.selected.as_ref() == Some(&device.id),
-                    );
-                    if card.connect {
-                        connect = Some(device.clone());
-                    }
-                    if card.select || card.connect {
-                        self.selected = Some(device.id.clone());
-                    }
-                }
-            });
-        ui.add_space(6.0);
+        ui.add_space(18.0);
+        ui.label(RichText::new("Dieser Computer im Konto").font(theme::semibold(14.0)).color(p.text));
+        ui.add_space(4.0);
         self.this_computer(ui, config);
         self.add_window(&ctx, config);
-        connect
     }
 
     fn signed_out(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let p = Palette::of(ui);
-        theme::section_label(ui, "Konto");
-        ui.add_space(6.0);
-        theme::card(ui).inner_margin(Margin::same(12)).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            if self.login.is_some() {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label("Anmeldung im Browser …");
-                });
-                ui.label(
-                    RichText::new(
-                        "Melde dich im geöffneten Browserfenster an. Danach geht es hier automatisch weiter.",
-                    )
-                    .size(12.0)
-                    .color(p.weak),
-                );
-                if theme::Button::new("Abbrechen", Kind::Ghost)
-                    .small()
-                    .show(ui)
-                    .clicked()
-                {
-                    if let Some((_, cancel)) = self.login.take() {
-                        cancel.store(true, Ordering::Release);
-                    }
-                }
-                return;
-            }
+        if self.login.is_some() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("Anmeldung im Browser …");
+            });
             ui.label(
-                RichText::new("Mit einem Konto siehst du hier alle deine Geräte und die deines Teams.")
+                RichText::new("Melde dich im geöffneten Browserfenster an. Danach geht es hier automatisch weiter.")
                     .size(12.5)
-                    .color(p.text),
+                    .color(p.weak),
             );
-            ui.add_space(6.0);
-            let field = ui.add(
-                egui::TextEdit::singleline(&mut self.url)
-                    .hint_text("Koordinationsserver, z. B. beach.example.com")
-                    .margin(Margin::symmetric(8, 5))
-                    .desired_width(f32::INFINITY),
-            );
-            let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            ui.add_space(6.0);
-            let login = theme::Button::new("Anmelden", Kind::Primary)
+            if theme::Button::new("Abbrechen", Kind::Ghost)
                 .small()
-                .enabled(!self.url.trim().is_empty())
                 .show(ui)
-                .on_hover_text("Öffnet den Browser zur Anmeldung mit GitHub oder Google");
-            if login.clicked() || (enter && !self.url.trim().is_empty()) {
-                self.start_login(ctx);
+                .clicked()
+            {
+                if let Some((_, cancel)) = self.login.take() {
+                    cancel.store(true, Ordering::Release);
+                }
             }
-            if let Some(e) = &self.error {
-                ui.add_space(4.0);
-                ui.label(RichText::new(e).size(12.0).color(theme::CORAL));
-            }
-        });
+            return;
+        }
+        ui.label(
+            RichText::new("Mit einem Konto siehst du in der Übersicht alle deine Geräte und die deines Teams und verbindest dich ohne VNC-Passwort.")
+                .color(p.text),
+        );
+        ui.add_space(8.0);
+        theme::field_label(ui, "Koordinationsserver");
+        let field = ui.add(
+            egui::TextEdit::singleline(&mut self.url)
+                .hint_text("z. B. beach.example.com")
+                .margin(Margin::symmetric(10, 7))
+                .desired_width(f32::INFINITY),
+        );
+        let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        ui.add_space(8.0);
+        let login = theme::Button::new("Im Browser anmelden", Kind::Primary)
+            .enabled(!self.url.trim().is_empty())
+            .show(ui)
+            .on_hover_text("Öffnet den Browser zur Anmeldung mit GitHub oder Google");
+        if login.clicked() || (enter && !self.url.trim().is_empty()) {
+            self.start_login(ctx);
+        }
     }
 
-    /// Whether this computer is in the account, with add and remove.
+    /// Whether this computer is in the account, with add and remove. The
+    /// link works on its own, so removing is possible while signed out.
     fn this_computer(&mut self, ui: &mut egui::Ui, config: &mut Config) {
         let p = Palette::of(ui);
         let busy = self.link_task.is_some();
         match config.server.device.clone() {
             Some(link) => {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(
-                        RichText::new(format!(
-                            "Dieser Computer ist als „{}“ im Konto ({}).",
-                            link.name, link.owner
-                        ))
-                        .size(12.0)
+                ui.label(
+                    RichText::new(format!("Im Konto als „{}“ ({}).", link.name, link.owner)).color(p.text),
+                );
+                ui.label(
+                    RichText::new("Wer Zugriff hat, verbindet sich über das Konto ohne VNC-Passwort.")
+                        .size(12.5)
                         .color(p.weak),
-                    );
-                    let label = if self.confirm_remove {
-                        "Wirklich entfernen?"
-                    } else {
-                        "Entfernen"
-                    };
-                    let remove = theme::Button::new(label, Kind::Ghost)
-                        .small()
-                        .enabled(!busy)
-                        .show(ui)
-                        .on_hover_text(
-                            "Danach ist dieser Computer nur noch über sein VNC-Passwort erreichbar.",
-                        );
-                    if remove.clicked() {
-                        if self.confirm_remove {
-                            self.confirm_remove = false;
-                            let (tx, rx) = channel();
-                            let ctx = ui.ctx().clone();
-                            std::thread::spawn(move || {
-                                let _ = tx.send(account::unregister(&link).map(|()| None));
-                                ctx.request_repaint();
-                            });
-                            self.link_task = Some(rx);
-                        } else {
-                            self.confirm_remove = true;
-                        }
-                    } else if self.confirm_remove && ui.input(|i| i.pointer.any_click()) {
+                );
+                ui.add_space(6.0);
+                let label = if self.confirm_remove {
+                    "Wirklich entfernen?"
+                } else {
+                    "Aus dem Konto entfernen"
+                };
+                let kind = if self.confirm_remove { Kind::Danger } else { Kind::Secondary };
+                let remove = theme::Button::new(label, kind)
+                    .small()
+                    .enabled(!busy)
+                    .show(ui)
+                    .on_hover_text("Danach ist dieser Computer nur noch über sein VNC-Passwort erreichbar.");
+                if remove.clicked() {
+                    if self.confirm_remove {
                         self.confirm_remove = false;
+                        let (tx, rx) = channel();
+                        let ctx = ui.ctx().clone();
+                        std::thread::spawn(move || {
+                            let _ = tx.send(account::unregister(&link).map(|()| None));
+                            ctx.request_repaint();
+                        });
+                        self.link_task = Some(rx);
+                    } else {
+                        self.confirm_remove = true;
                     }
-                });
+                } else if self.confirm_remove && ui.input(|i| i.pointer.any_click()) {
+                    self.confirm_remove = false;
+                }
             }
             None => {
-                ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new("Dieser Computer ist noch nicht im Konto.").color(p.text));
+                if !config.account.signed_in() {
                     ui.label(
-                        RichText::new("Dieser Computer ist noch nicht im Konto.")
-                            .size(12.0)
+                        RichText::new("Melde dich oben an, um ihn hinzuzufügen.")
+                            .size(12.5)
                             .color(p.weak),
                     );
-                    if theme::Button::new("Hinzufügen …", Kind::Secondary)
-                        .small()
-                        .enabled(!busy && self.me.is_some())
-                        .show(ui)
-                        .clicked()
-                    {
-                        self.add = Some(AddDialog {
-                            name: computer_name(),
-                            org: None,
-                        });
-                    }
-                });
+                    return;
+                }
+                ui.add_space(6.0);
+                if theme::Button::new("Hinzufügen …", Kind::Secondary)
+                    .small()
+                    .enabled(!busy && self.me.is_some())
+                    .show(ui)
+                    .clicked()
+                {
+                    self.add = Some(AddDialog {
+                        name: computer_name(),
+                        org: None,
+                    });
+                }
             }
         }
     }
@@ -471,80 +421,11 @@ impl AccountPanel {
             self.add = None;
         }
     }
-
-    /// The main area for the selected device. Returns true for "Verbinden".
-    pub fn details(&self, ui: &mut egui::Ui, width: f32, connecting: bool) -> bool {
-        let Some(device) = self.selected() else {
-            return false;
-        };
-        let p = Palette::of(ui);
-        let owner = device
-            .org
-            .as_ref()
-            .map(|o| o.name.as_str())
-            .unwrap_or("Persönlich");
-        ui.label(RichText::new(&device.name).font(theme::bold(22.0)).color(p.text));
-        ui.label(RichText::new(format!("Gerät im Konto · {owner}")).color(p.weak));
-        ui.add_space(14.0);
-        let mut connect = false;
-        theme::card(ui).show(ui, |ui| {
-            ui.set_width(width - 34.0);
-            egui::Grid::new("device-details")
-                .num_columns(2)
-                .spacing([16.0, 6.0])
-                .show(ui, |ui| {
-                    ui.label(RichText::new("Status").color(p.weak));
-                    ui.horizontal(|ui| {
-                        theme::dot(ui, if device.online { theme::GREEN } else { p.weak });
-                        ui.label(status(device));
-                    });
-                    ui.end_row();
-                    ui.label(RichText::new("System").color(p.weak));
-                    ui.label(match device.platform.as_str() {
-                        "macos" => "macOS",
-                        "windows" => "Windows",
-                        other => other,
-                    });
-                    ui.end_row();
-                    ui.label(RichText::new("Adressen").color(p.weak));
-                    ui.vertical(|ui| {
-                        if device.addresses.is_empty() {
-                            ui.label("–");
-                        }
-                        for address in &device.addresses {
-                            ui.monospace(account::endpoint(address, device.port));
-                        }
-                    });
-                    ui.end_row();
-                });
-            ui.add_space(12.0);
-            if device.addresses.is_empty() {
-                ui.weak("Das Gerät hat noch keine Adresse gemeldet. Läuft VNC Beach dort?");
-                ui.add_space(6.0);
-            }
-            let label = if connecting { "Verbinde …" } else { "Verbinden" };
-            connect = theme::Button::new(label, Kind::Primary)
-                .enabled(!connecting && !device.addresses.is_empty())
-                .min_size(Vec2::new(width - 34.0, 36.0))
-                .show(ui)
-                .clicked();
-            ui.add_space(4.0);
-            ui.weak("Die Verbindung läuft direkt zum Gerät (LAN oder Tailscale). Der Koordinationsserver stellt nur die Zugangsberechtigung aus.");
-        });
-        connect
-    }
 }
 
-/// A favorites-style card: the status line takes the address's place.
-fn card_server(device: &Device) -> Server {
-    Server {
-        name: device.name.clone(),
-        host: status(device),
-        ..Server::default()
-    }
-}
-
-fn status(device: &Device) -> String {
+/// The card's status line: online with the first address, or when the
+/// device was last seen.
+pub fn status(device: &Device) -> String {
     if device.online {
         return match device.addresses.first() {
             Some(address) => format!("online · {address}"),

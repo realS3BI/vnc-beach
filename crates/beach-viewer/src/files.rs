@@ -58,7 +58,9 @@ pub struct Panel {
 }
 
 impl Panel {
-    pub fn new(connection: FileChannel, ctx: egui::Context) -> Self {
+    /// `viewport` is the session window that shows the panel; the worker
+    /// repaints it when something arrives.
+    pub fn new(connection: FileChannel, ctx: egui::Context, viewport: egui::ViewportId) -> Self {
         let (commands, rx) = sync_channel(1);
         let (tx, events) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -68,6 +70,7 @@ impl Panel {
             cancel: cancel.clone(),
             progress: progress.clone(),
             ctx,
+            viewport,
             events: tx,
         };
         std::thread::spawn(move || worker.run(rx));
@@ -447,13 +450,14 @@ struct Worker {
     cancel: Arc<AtomicBool>,
     progress: Arc<Mutex<Progress>>,
     ctx: egui::Context,
+    viewport: egui::ViewportId,
     events: std::sync::mpsc::Sender<Event>,
 }
 
 impl Worker {
     fn emit(&self, event: Event) {
         let _ = self.events.send(event);
-        self.ctx.request_repaint();
+        self.ctx.request_repaint_of(self.viewport);
     }
 
     fn run(self, commands: Receiver<Command>) {
@@ -539,7 +543,7 @@ impl Worker {
             done,
             total,
         };
-        self.ctx.request_repaint();
+        self.ctx.request_repaint_of(self.viewport);
     }
 
     fn list(&self, path: String) -> Result<()> {
@@ -774,7 +778,7 @@ mod tests {
         std::fs::write(&source, &data).unwrap();
         let (mut connection, task) = peer(remote.path().into(), true);
         let ctx = egui::Context::default();
-        let mut panel = Panel::new(connection.files.take().unwrap(), ctx.clone());
+        let mut panel = Panel::new(connection.files.take().unwrap(), ctx.clone(), egui::ViewportId::ROOT);
         pump(&mut panel, &ctx, |p| matches!(p.support, Support::Ready));
         let input = egui::RawInput {
             dropped_files: vec![Arc::new(DropFile(source.clone()))],
@@ -820,7 +824,7 @@ mod tests {
         for supports in [false, true] {
             let (mut connection, task) = peer(remote.path().into(), supports);
             let ctx = egui::Context::default();
-            let mut panel = Panel::new(connection.files.take().unwrap(), ctx.clone());
+            let mut panel = Panel::new(connection.files.take().unwrap(), ctx.clone(), egui::ViewportId::ROOT);
             if supports {
                 pump(&mut panel, &ctx, |p| matches!(p.support, Support::Ready));
             }
@@ -849,7 +853,7 @@ mod tests {
         file.set_len(128 * 1024 * 1024).unwrap();
         let (mut connection, task) = peer(remote.path().into(), true);
         let ctx = egui::Context::default();
-        let mut panel = Panel::new(connection.files.take().unwrap(), ctx.clone());
+        let mut panel = Panel::new(connection.files.take().unwrap(), ctx.clone(), egui::ViewportId::ROOT);
         pump(&mut panel, &ctx, |p| matches!(p.support, Support::Ready));
         panel.start(Command::Upload {
             paths: vec![source],

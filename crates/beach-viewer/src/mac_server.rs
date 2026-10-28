@@ -131,7 +131,11 @@ pub fn request_setup(automatic_login: bool) -> Result<(), String> {
     if password.is_empty() { return Err("Ein Passwort ist erforderlich.".into()); }
     // Authenticate separately. If the password is wrong, sudo must not
     // consume the JSON intended for the elevated installer as another try.
-    let mut auth = Command::new("/usr/bin/sudo").args(["-S", "-k", "-p", "", "-v"])
+    // The installer below runs with `sudo -n` on the credentials cached
+    // here, so `-v` must not get `-k` (which skips caching); a separate
+    // `sudo -k` drops an older cache first, so the password is checked.
+    let _ = Command::new("/usr/bin/sudo").arg("-k").status();
+    let mut auth = Command::new("/usr/bin/sudo").args(["-S", "-p", "", "-v"])
         .stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped())
         .spawn().map_err(|e| e.to_string())?;
     writeln!(auth.stdin.take().ok_or("Passworteingabe nicht verfügbar")?, "{}", password.as_str()).map_err(|e| e.to_string())?;

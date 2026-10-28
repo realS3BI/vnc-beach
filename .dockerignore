@@ -1,5 +1,8 @@
 target
 apps
 docs
+!docs/favicon.svg
+!docs/favicon.ico
+!docs/apple-touch-icon.png
 assets
 .git

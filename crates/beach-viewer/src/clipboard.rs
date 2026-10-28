@@ -11,13 +11,14 @@ pub struct Clipboard {
 
 impl Clipboard {
     /// Starts polling. The current clipboard counts as a change right away,
-    /// so what was copied before connecting can be pasted remotely.
-    pub fn start(ctx: egui::Context) -> Clipboard {
+    /// so what was copied before connecting can be pasted remotely. Changes
+    /// repaint the session window `viewport`.
+    pub fn start(ctx: egui::Context, viewport: egui::ViewportId) -> Clipboard {
         let (set, set_rx) = channel::<String>();
         let (changes_tx, changes) = channel();
         std::thread::Builder::new()
             .name("clipboard".into())
-            .spawn(move || poll(ctx, set_rx, changes_tx))
+            .spawn(move || poll(ctx, viewport, set_rx, changes_tx))
             .expect("spawn clipboard thread");
         Clipboard { set, changes }
     }
@@ -33,7 +34,7 @@ impl Clipboard {
     }
 }
 
-fn poll(ctx: egui::Context, set_rx: Receiver<String>, changes: Sender<String>) {
+fn poll(ctx: egui::Context, viewport: egui::ViewportId, set_rx: Receiver<String>, changes: Sender<String>) {
     let Ok(mut board) = arboard::Clipboard::new() else {
         log::warn!("clipboard unavailable, clipboard sync disabled");
         return;
@@ -55,7 +56,7 @@ fn poll(ctx: egui::Context, set_rx: Receiver<String>, changes: Sender<String>) {
                     if changes.send(current).is_err() {
                         break;
                     }
-                    ctx.request_repaint();
+                    ctx.request_repaint_of(viewport);
                 }
             }
             Err(RecvTimeoutError::Disconnected) => break,
