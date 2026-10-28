@@ -1,6 +1,7 @@
 //! The VNC Beach server as a library: `beach-server` is a thin CLI around it,
 //! and the viewer embeds it as its background server on Windows.
 
+pub mod camera;
 pub mod capture;
 pub mod clipboard;
 #[cfg(windows)]
@@ -106,6 +107,7 @@ impl Server {
             clipboard,
             input,
             file_transfer: !opts.view_only,
+            camera: if opts.view_only { None } else { camera::Hub::new() },
             home: opts.home,
             password: opts.password,
             tickets: opts.tickets,

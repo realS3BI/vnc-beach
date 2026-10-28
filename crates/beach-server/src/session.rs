@@ -26,6 +26,8 @@ pub struct Context {
     /// Accepts VNC Beach account tickets next to the password.
     pub tickets: Option<beach_account::ticket::Verifier>,
     pub file_transfer: bool,
+    /// Shows viewers' webcams as a camera here; `None` where unsupported.
+    pub camera: Option<Arc<crate::camera::Hub>>,
     /// Root for file transfers; the server user's home directory if `None`.
     pub home: Option<std::path::PathBuf>,
     pub fps: u32,
@@ -84,6 +86,7 @@ pub fn run(stream: TcpStream, ctx: &Context) -> anyhow::Result<()> {
         layout: frame.layout.clone(),
         clipboard_seq: ctx.clipboard.seq(),
         files: None,
+        camera: None,
         view_only: grant.is_some_and(|g| g.view_only),
     };
     let result = session.serve(ctx, rx);
@@ -114,6 +117,7 @@ struct Session {
     layout: Arc<Layout>,
     clipboard_seq: u64,
     files: Option<crate::files::Session>,
+    camera: Option<crate::camera::Link>,
     /// The account ticket only allows watching.
     view_only: bool,
 }
@@ -196,6 +200,10 @@ impl Session {
                 messages::write_server_cut_text(&mut self.out, &text)?;
                 self.out.flush()?;
             }
+            if let Some(msg) = self.camera.as_mut().and_then(|c| c.poll()) {
+                msg.write(&mut self.out)?;
+                self.out.flush()?;
+            }
             if let Some(pending) = self.pending {
                 if self.send_update(ctx, pending)? {
                     self.pending = None;
@@ -232,6 +240,16 @@ impl Session {
                     }
                 } else {
                     self.files = None;
+                }
+                let camera = !self.view_only && encs.contains(&encoding::BEACH_CAMERA);
+                if !camera {
+                    self.camera = None;
+                } else if self.camera.is_none() {
+                    if let Some(link) = ctx.camera.as_ref().and_then(|hub| hub.link()) {
+                        link.hello().write(&mut self.out)?;
+                        self.out.flush()?;
+                        self.camera = Some(link);
+                    }
                 }
             }
             ClientMessage::FramebufferUpdateRequest {
@@ -286,6 +304,15 @@ impl Session {
                 };
                 files.handle(request).write(&mut self.out)?;
                 self.out.flush()?;
+            }
+            ClientMessage::Camera(msg) => {
+                let Some(camera) = &mut self.camera else {
+                    anyhow::bail!("camera was not negotiated");
+                };
+                match msg {
+                    rfb::camera::ClientMessage::Sharing(on) => camera.sharing(on),
+                    rfb::camera::ClientMessage::Video(video) => camera.video(video),
+                }
             }
             ClientMessage::ClientCutText(text) => {
                 log::debug!("viewer clipboard: {} chars", text.chars().count());

@@ -301,6 +301,9 @@ impl Reader {
                 ServerMessage::FileTransfer(_) => {
                     return Err(Error::Protocol("file transfer was not negotiated".into()));
                 }
+                ServerMessage::Camera(_) => {
+                    return Err(Error::Protocol("camera was not negotiated".into()));
+                }
                 ServerMessage::Bell | ServerMessage::SetColourMapEntries => {}
             }
         }

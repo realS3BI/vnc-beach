@@ -38,6 +38,13 @@ pub struct ServerPanel {
     mac_auto_login: bool,
     #[cfg(target_os = "macos")]
     mac_finished: bool,
+    /// The camera extension is installed (checked when the settings open).
+    #[cfg(target_os = "macos")]
+    camera_installed: bool,
+    #[cfg(target_os = "macos")]
+    camera_setup: Option<Receiver<crate::camera_extension::Progress>>,
+    #[cfg(target_os = "macos")]
+    camera_waiting: bool,
     /// The virtual display driver is installed (checked when the settings open).
     #[cfg(windows)]
     driver_installed: bool,
@@ -100,6 +107,12 @@ impl ServerPanel {
             mac_auto_login: false,
             #[cfg(target_os = "macos")]
             mac_finished: false,
+            #[cfg(target_os = "macos")]
+            camera_installed: false,
+            #[cfg(target_os = "macos")]
+            camera_setup: None,
+            #[cfg(target_os = "macos")]
+            camera_waiting: false,
             #[cfg(windows)]
             driver_installed: false,
             #[cfg(windows)]
@@ -125,6 +138,23 @@ impl ServerPanel {
                         self.mac_status.message = "Eingerichtet. Status wird geprüft; ein Neustarttest steht noch aus.".into();
                     }
                     Err(error) => self.error = Some(error),
+                }
+            }
+        }
+        #[cfg(target_os = "macos")]
+        while let Some(progress) = self.camera_setup.as_ref().and_then(|receive| receive.try_recv().ok()) {
+            use crate::camera_extension::Progress;
+            match progress {
+                Progress::NeedsApproval => self.camera_waiting = true,
+                Progress::Done => {
+                    self.camera_setup = None;
+                    self.camera_waiting = false;
+                    self.camera_installed = true;
+                }
+                Progress::Failed(e) => {
+                    self.camera_setup = None;
+                    self.camera_waiting = false;
+                    self.error = Some(format!("Kamera: {e}"));
                 }
             }
         }
@@ -183,6 +213,62 @@ impl ServerPanel {
                 let _ = send.send(result);
                 context.request_repaint();
             });
+        }
+    }
+
+    /// macOS: the virtual camera that shows a viewer's webcam.
+    #[cfg(target_os = "macos")]
+    fn camera_row(&mut self, ui: &mut egui::Ui) {
+        if !crate::camera_extension::bundled() {
+            return;
+        }
+        ui.add_space(6.0);
+        ui.strong("Kamera vom Viewer");
+        if self.camera_installed {
+            ui.weak(
+                "Eingerichtet: Apps auf diesem Mac sehen die Kamera „VNC Beach“. Sie zeigt die Kamera \
+                 eines verbundenen Viewers, wenn dort „Kamera“ eingeschaltet ist.",
+            );
+            return;
+        }
+        ui.weak(
+            "Stellt die Kamera eines verbundenen Viewers als Kamera „VNC Beach“ bereit, etwa für \
+             FaceTime, Zoom oder Teams. macOS fragt einmal in den Systemeinstellungen nach der Erlaubnis.",
+        );
+        if self.camera_waiting {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("Bitte in den Systemeinstellungen unter Allgemein → Anmeldeobjekte & Erweiterungen → Kameraerweiterungen erlauben …");
+            });
+            if theme::Button::new("Systemeinstellungen öffnen", Kind::Ghost).small().show(ui).clicked() {
+                let _ = std::process::Command::new("open")
+                    .arg("x-apple.systempreferences:com.apple.LoginItems-Settings.extension")
+                    .spawn();
+            }
+        } else if self.camera_setup.is_some() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("Kamera wird eingerichtet …");
+            });
+        } else if theme::Button::new("Kamera einrichten", Kind::Secondary).small().show(ui).clicked() {
+            self.error = None;
+            let rx = crate::camera_extension::activate();
+            // The delegate runs on a dispatch queue; wake the UI for each step.
+            let (tx, forwarded) = channel();
+            let context = ui.ctx().clone();
+            std::thread::spawn(move || {
+                for progress in rx {
+                    let last = !matches!(progress, crate::camera_extension::Progress::NeedsApproval);
+                    if tx.send(progress).is_err() {
+                        break;
+                    }
+                    context.request_repaint();
+                    if last {
+                        break;
+                    }
+                }
+            });
+            self.camera_setup = Some(forwarded);
         }
     }
 
@@ -453,6 +539,10 @@ impl ServerPanel {
         {
             self.driver_installed = crate::display_driver::installed();
         }
+        #[cfg(target_os = "macos")]
+        {
+            self.camera_installed = crate::camera_extension::installed();
+        }
         self.saved = false;
     }
 
@@ -505,6 +595,8 @@ impl ServerPanel {
         }
         #[cfg(target_os = "macos")]
         self.mac_server_row(ui);
+        #[cfg(target_os = "macos")]
+        self.camera_row(ui);
         #[cfg(windows)]
         self.virtual_display_row(ui);
         ui.add_space(10.0);

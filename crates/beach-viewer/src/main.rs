@@ -8,6 +8,9 @@ mod account_ui;
 mod app;
 mod autostart;
 mod background;
+mod camera;
+#[cfg(target_os = "macos")]
+mod camera_extension;
 mod cards;
 mod client;
 mod clipboard;
@@ -56,6 +59,10 @@ struct Args {
     /// (Windows, needs administrator rights).
     #[arg(long)]
     install_display_driver: bool,
+    /// Install the macOS camera extension that shows a viewer's webcam as
+    /// the camera "VNC Beach" (asks for approval in System Settings).
+    #[arg(long)]
+    install_camera: bool,
     /// Remove the Windows service (needs administrator rights).
     #[arg(long, hide = true)]
     uninstall_service: bool,
@@ -81,6 +88,18 @@ struct Args {
 fn main() {
     let args = Args::parse();
     init_logging(&args);
+    if args.install_camera {
+        #[cfg(target_os = "macos")]
+        let result = camera_extension::install_and_wait();
+        #[cfg(not(target_os = "macos"))]
+        let result: anyhow::Result<()> = Err(anyhow::anyhow!("--install-camera is macOS only"));
+        if let Err(e) = result {
+            eprintln!("{e:#}");
+            std::process::exit(1);
+        }
+        println!("camera extension installed");
+        return;
+    }
     if let Some(dir) = &args.config_dir {
         servers::set_config_dir(dir.clone());
     }

@@ -10,3 +10,6 @@ pub const EXTENDED_DESKTOP_SIZE: i32 = -308;
 
 /// Experimental VNC Beach file transfer v1 (BFT1), not an IANA assignment.
 pub const BEACH_FILE_TRANSFER: i32 = 0x42465401;
+
+/// Experimental VNC Beach camera v1 (BCM1), not an IANA assignment.
+pub const BEACH_CAMERA: i32 = 0x42434D01;

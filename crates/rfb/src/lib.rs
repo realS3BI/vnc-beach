@@ -4,6 +4,7 @@
 //! both sides interoperate with TigerVNC, RealVNC, macOS Screen Sharing etc.
 
 pub mod auth;
+pub mod camera;
 pub mod encoding;
 pub mod files;
 pub mod handshake;

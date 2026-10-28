@@ -232,6 +232,9 @@ impl Remote {
                         if ui.button(self.files.button_label()).clicked() {
                             self.files.open = !self.files.open;
                         }
+                        if let Some(camera) = self.conn.camera.as_ref().filter(|c| c.offered()) {
+                            camera_toggle(ui, camera);
+                        }
                         if ui.button("Trennen").clicked() {
                             disconnect = true;
                         }
@@ -674,6 +677,27 @@ impl Remote {
 pub const TOOLBAR_HEIGHT: f32 = 30.0;
 
 /// Toolbar text for the display choice.
+/// Toolbar switch for sharing the webcam; the hover text tells what it does.
+fn camera_toggle(ui: &mut egui::Ui, camera: &std::sync::Arc<crate::camera::Camera>) {
+    use crate::camera::Status;
+    let status = camera.status();
+    let label = match status {
+        Status::Live(_) => "Kamera ●",
+        _ => "Kamera",
+    };
+    let hint = match &status {
+        Status::Off => "Eigene Kamera auf dem entfernten Rechner als Kamera „VNC Beach“ bereitstellen".to_string(),
+        Status::Ready => "Bereit: Die Kamera startet, sobald dort eine App die Kamera „VNC Beach“ nutzt".to_string(),
+        Status::Starting => "Kamera wird gestartet …".to_string(),
+        Status::Live(name) => format!("{name} wird übertragen"),
+        Status::Failed(message) => format!("Kamera nicht verfügbar: {message}"),
+    };
+    let response = ui.selectable_label(camera.enabled(), label).on_hover_text(hint);
+    if response.clicked() {
+        camera.set_enabled(!camera.enabled());
+    }
+}
+
 fn screen_label(screens: &[Screen], view: Option<usize>) -> String {
     match view.and_then(|i| screens.get(i).map(|s| (i, s))) {
         Some((i, s)) => format!("Bildschirm {} ({}×{})", i + 1, s.width, s.height),

@@ -1,0 +1,420 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		181BD6C5639993FBE99A2A1B /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 787FBCDAFF97E6FEC56B2501 /* main.swift */; };
+		34078755E52DA6F827A04FEE /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB23B91DFB7C66C06A8F969E /* main.swift */; };
+		759A545B0545524B5AE8218D /* CameraExtension.systemextension in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = 785981F85619E26A6EDD0D55 /* CameraExtension.systemextension */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		EB17AFDBCF7C31FD9379942B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 6A60512A45C102A8C09BC6D4 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 86F19D8817CF9624336FB293;
+			remoteInfo = CameraExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A9BD6F33458071CC868018CC /* Embed System Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(SYSTEM_EXTENSIONS_FOLDER_PATH)";
+			dstSubfolderSpec = 16;
+			files = (
+				759A545B0545524B5AE8218D /* CameraExtension.systemextension in Embed System Extensions */,
+			);
+			name = "Embed System Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		648B6639F409376E1761789D /* Host.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Host.entitlements; sourceTree = "<group>"; };
+		785981F85619E26A6EDD0D55 /* CameraExtension.systemextension */ = {isa = PBXFileReference; explicitFileType = "wrapper.system-extension"; includeInIndex = 0; path = CameraExtension.systemextension; sourceTree = BUILT_PRODUCTS_DIR; };
+		787FBCDAFF97E6FEC56B2501 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		8BC36A21CA7D97963A9DDDAB /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
+		8BE058BD2783C7FB846565E9 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		9BF2C3D82704926AF5DA6E35 /* CameraExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CameraExtension.entitlements; sourceTree = "<group>"; };
+		A3F8B350F23FDFBB93504496 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		CB23B91DFB7C66C06A8F969E /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		FA7FF4E2E6DBF7A706EAB368 /* Host.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Host.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		486F8EC4FAF933298C142ECB /* Host */ = {
+			isa = PBXGroup;
+			children = (
+				648B6639F409376E1761789D /* Host.entitlements */,
+				8BE058BD2783C7FB846565E9 /* Info.plist */,
+				CB23B91DFB7C66C06A8F969E /* main.swift */,
+			);
+			path = Host;
+			sourceTree = "<group>";
+		};
+		4E7ECB13F6CFE27B3EACA91D = {
+			isa = PBXGroup;
+			children = (
+				A5AC3A01EAE65CE05138DDDF /* Config */,
+				F4E0019FB16321AC4A6E6926 /* Extension */,
+				486F8EC4FAF933298C142ECB /* Host */,
+				DB3DC5DBEA7868B87D2111D0 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A5AC3A01EAE65CE05138DDDF /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				8BC36A21CA7D97963A9DDDAB /* Base.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		DB3DC5DBEA7868B87D2111D0 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				785981F85619E26A6EDD0D55 /* CameraExtension.systemextension */,
+				FA7FF4E2E6DBF7A706EAB368 /* Host.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		F4E0019FB16321AC4A6E6926 /* Extension */ = {
+			isa = PBXGroup;
+			children = (
+				9BF2C3D82704926AF5DA6E35 /* CameraExtension.entitlements */,
+				A3F8B350F23FDFBB93504496 /* Info.plist */,
+				787FBCDAFF97E6FEC56B2501 /* main.swift */,
+			);
+			path = Extension;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		27EB5FAA520D8B7FC75644A2 /* Host */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8163E7352159F6C745809DA3 /* Build configuration list for PBXNativeTarget "Host" */;
+			buildPhases = (
+				9E7BA45B5F697F115225815D /* Sources */,
+				A9BD6F33458071CC868018CC /* Embed System Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CD9979F3F5E00ADA5F731D59 /* PBXTargetDependency */,
+			);
+			name = Host;
+			packageProductDependencies = (
+			);
+			productName = Host;
+			productReference = FA7FF4E2E6DBF7A706EAB368 /* Host.app */;
+			productType = "com.apple.product-type.application";
+		};
+		86F19D8817CF9624336FB293 /* CameraExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F14BEC9A4FE0602CE482A7C8 /* Build configuration list for PBXNativeTarget "CameraExtension" */;
+			buildPhases = (
+				391349F860E3F3F975B1F96C /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CameraExtension;
+			packageProductDependencies = (
+			);
+			productName = CameraExtension;
+			productReference = 785981F85619E26A6EDD0D55 /* CameraExtension.systemextension */;
+			productType = "com.apple.product-type.system-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		6A60512A45C102A8C09BC6D4 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					27EB5FAA520D8B7FC75644A2 = {
+						ProvisioningStyle = Automatic;
+					};
+					86F19D8817CF9624336FB293 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 19B3C3ED2BF772ACDDB78E84 /* Build configuration list for PBXProject "VNCBeachCamera" */;
+			developmentRegion = de;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				de,
+			);
+			mainGroup = 4E7ECB13F6CFE27B3EACA91D;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = DB3DC5DBEA7868B87D2111D0 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				86F19D8817CF9624336FB293 /* CameraExtension */,
+				27EB5FAA520D8B7FC75644A2 /* Host */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		391349F860E3F3F975B1F96C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				181BD6C5639993FBE99A2A1B /* main.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9E7BA45B5F697F115225815D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				34078755E52DA6F827A04FEE /* main.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		CD9979F3F5E00ADA5F731D59 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 86F19D8817CF9624336FB293 /* CameraExtension */;
+			targetProxy = EB17AFDBCF7C31FD9379942B /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		27F58A66A46AAE50923EE405 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Host/Host.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Host/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "at.schlossers.vnc-beach";
+				PRODUCT_NAME = "VNC Beach";
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		584C57E4CFCCC6266CF868C8 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 8BC36A21CA7D97963A9DDDAB /* Base.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		829C42528C1DC2E0DBD694AC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Extension/CameraExtension.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Extension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "at.schlossers.vnc-beach.camera";
+				PRODUCT_NAME = "at.schlossers.vnc-beach.camera";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A0766653AFFE47E5E8ABF065 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Extension/CameraExtension.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Extension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "at.schlossers.vnc-beach.camera";
+				PRODUCT_NAME = "at.schlossers.vnc-beach.camera";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		ABAE6ADA948307A42A52B5F4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Host/Host.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Host/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "at.schlossers.vnc-beach";
+				PRODUCT_NAME = "VNC Beach";
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		E8B413DDEC42882795B6AF38 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 8BC36A21CA7D97963A9DDDAB /* Base.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		19B3C3ED2BF772ACDDB78E84 /* Build configuration list for PBXProject "VNCBeachCamera" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E8B413DDEC42882795B6AF38 /* Debug */,
+				584C57E4CFCCC6266CF868C8 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		8163E7352159F6C745809DA3 /* Build configuration list for PBXNativeTarget "Host" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				27F58A66A46AAE50923EE405 /* Debug */,
+				ABAE6ADA948307A42A52B5F4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F14BEC9A4FE0602CE482A7C8 /* Build configuration list for PBXNativeTarget "CameraExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				829C42528C1DC2E0DBD694AC /* Debug */,
+				A0766653AFFE47E5E8ABF065 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 6A60512A45C102A8C09BC6D4 /* Project object */;
+}

@@ -8,6 +8,8 @@ mod access;
 mod access_ui;
 #[path = "../src/account.rs"]
 mod account;
+#[path = "../src/camera.rs"]
+mod camera;
 #[path = "../src/client.rs"]
 mod client;
 #[path = "../src/servers.rs"]

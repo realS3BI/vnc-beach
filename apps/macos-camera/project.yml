@@ -1,0 +1,45 @@
+# Virtual camera for VNC Beach: a CoreMediaIO camera extension that shows the
+# viewer's webcam on this Mac. tools/build-macos-app.sh builds this project and
+# moves the extension, the host's provisioning profile and entitlements into
+# "VNC Beach.app"; the host target's own executable is only a placeholder.
+name: VNCBeachCamera
+
+options:
+  createIntermediateGroups: true
+  developmentLanguage: de
+  deploymentTarget:
+    macOS: "13.0"
+  minimumXcodeGenVersion: 2.44.0
+
+configFiles:
+  Debug: Config/Base.xcconfig
+  Release: Config/Base.xcconfig
+
+targets:
+  CameraExtension:
+    type: system-extension
+    platform: macOS
+    sources:
+      - path: Extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: at.schlossers.vnc-beach.camera
+        PRODUCT_NAME: at.schlossers.vnc-beach.camera
+        INFOPLIST_FILE: Extension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Extension/CameraExtension.entitlements
+        SWIFT_VERSION: 5.0
+
+  Host:
+    type: application
+    platform: macOS
+    sources:
+      - path: Host
+    dependencies:
+      - target: CameraExtension
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: at.schlossers.vnc-beach
+        PRODUCT_NAME: VNC Beach
+        INFOPLIST_FILE: Host/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Host/Host.entitlements

@@ -74,6 +74,8 @@ pub struct Connection {
     writer: Arc<Mutex<BufWriter<TcpStream>>>,
     stream: TcpStream,
     pub files: Option<FileChannel>,
+    /// Webcam sharing, where this platform supports it.
+    pub camera: Option<Arc<crate::camera::Camera>>,
 }
 
 impl Connection {
@@ -84,8 +86,9 @@ impl Connection {
         password: Option<&str>,
         account: Option<&crate::account::Target>,
         pf: PixelFormat,
-        repaint: impl Fn() + Send + 'static,
+        repaint: impl Fn() + Send + Sync + 'static,
     ) -> rfb::Result<Connection> {
+        let repaint: Arc<dyn Fn() + Send + Sync> = Arc::new(repaint);
         stream.set_nodelay(true)?;
         stream.set_write_timeout(Some(Duration::from_secs(15)))?;
         stream.set_read_timeout(Some(Duration::from_secs(15)))?;
@@ -104,21 +107,27 @@ impl Connection {
 
         let (w, h) = (init.width as usize, init.height as usize);
         let fb = Arc::new(Mutex::new(Framebuffer::new(w, h, 0, Vec::new())));
-        let mut writer = BufWriter::new(stream.try_clone()?);
-        ClientMessage::SetPixelFormat(pf).write(&mut writer)?;
-        ClientMessage::SetEncodings(vec![
-            encoding::ZRLE,
-            encoding::COPY_RECT,
-            encoding::RAW,
-            encoding::EXTENDED_DESKTOP_SIZE,
-            encoding::DESKTOP_SIZE,
-            encoding::BEACH_FILE_TRANSFER,
-        ])
-        .write(&mut writer)?;
-        request((0, 0, w, h), false).write(&mut writer)?;
-        writer.flush()?;
+        let writer = Arc::new(Mutex::new(BufWriter::new(stream.try_clone()?)));
+        let camera = crate::camera::Camera::new(writer.clone(), repaint.clone());
+        {
+            let mut writer = writer.lock().unwrap();
+            ClientMessage::SetPixelFormat(pf).write(&mut *writer)?;
+            let mut encodings = vec![
+                encoding::ZRLE,
+                encoding::COPY_RECT,
+                encoding::RAW,
+                encoding::EXTENDED_DESKTOP_SIZE,
+                encoding::DESKTOP_SIZE,
+                encoding::BEACH_FILE_TRANSFER,
+            ];
+            if camera.is_some() {
+                encodings.push(encoding::BEACH_CAMERA);
+            }
+            ClientMessage::SetEncodings(encodings).write(&mut *writer)?;
+            request((0, 0, w, h), false).write(&mut *writer)?;
+            writer.flush()?;
+        }
 
-        let writer = Arc::new(Mutex::new(writer));
         let region = Arc::new(Mutex::new(None));
         let (tx, notices) = channel();
         let (file_tx, replies) = sync_channel(1);
@@ -131,7 +140,8 @@ impl Connection {
             zrle: ZrleDecoder::new(),
             notices: tx,
             files: file_tx,
-            repaint: Box::new(repaint),
+            camera: camera.clone(),
+            repaint,
         };
         std::thread::Builder::new()
             .name("rfb-reader".into())
@@ -149,6 +159,7 @@ impl Connection {
                 writer: writer.clone(),
                 replies,
             }),
+            camera,
         })
     }
 
@@ -221,7 +232,8 @@ struct Reader {
     zrle: ZrleDecoder,
     notices: Sender<Notice>,
     files: SyncSender<rfb::files::Response>,
-    repaint: Box<dyn Fn() + Send>,
+    camera: Option<Arc<crate::camera::Camera>>,
+    repaint: Arc<dyn Fn() + Send + Sync>,
 }
 
 impl Reader {
@@ -265,6 +277,10 @@ impl Reader {
                         return Err(Error::Protocol("unsolicited file transfer response".into()));
                     }
                 }
+                ServerMessage::Camera(msg) => match &self.camera {
+                    Some(camera) => camera.handle(msg),
+                    None => return Err(Error::Protocol("camera was not negotiated".into())),
+                },
                 ServerMessage::Bell | ServerMessage::SetColourMapEntries => {}
             }
         }
