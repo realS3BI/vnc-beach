@@ -2,18 +2,22 @@
 //! (the one with the tray icon and the server).
 //!
 //! The background process listens on 127.0.0.1 at a random port and writes
-//! the port to `control.port` in the config directory. A request is one
-//! line (the command), the reply is a TOML [`Status`]; then the connection
-//! closes. The Windows service's agent answers the same way on
-//! `service.port` (see [`crate::service`]).
+//! the port and a random secret to `control.port` in the config directory
+//! (two lines; the file is readable by its user only). A request is two
+//! lines, the command and the secret; the reply is a TOML [`Status`]; then
+//! the connection closes. Every local process can reach a loopback port,
+//! and the status carries the VNC password, so only processes that can
+//! read the user's config directory may ask. The Windows service's agent
+//! answers the same way on `service.port` (see [`crate::service`]).
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::{fs, thread};
 
 use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq as _;
 
 use crate::servers::config_dir;
 
@@ -99,18 +103,71 @@ pub fn call(cmd: Command) -> Option<Status> {
 }
 
 pub fn call_at(endpoint: Endpoint, cmd: Command) -> Option<Status> {
-    let port: u16 = fs::read_to_string(endpoint.port_file()?).ok()?.trim().parse().ok()?;
-    call_port(port, cmd)
+    let (port, secret) = read_port_file(&endpoint.port_file()?)?;
+    call_port(port, &secret, cmd)
 }
 
-fn call_port(port: u16, cmd: Command) -> Option<Status> {
+/// Port and secret from a port file. A file of an older version has no
+/// secret; such a process answers without one.
+fn read_port_file(path: &Path) -> Option<(u16, String)> {
+    let text = fs::read_to_string(path).ok()?;
+    let mut lines = text.lines();
+    let port: u16 = lines.next()?.trim().parse().ok()?;
+    let secret = lines.next().unwrap_or_default().trim().to_string();
+    Some((port, secret))
+}
+
+fn call_port(port: u16, secret: &str, cmd: Command) -> Option<Status> {
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(500)).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(3))).ok()?;
-    writeln!(stream, "{}", cmd.as_str()).ok()?;
+    write!(stream, "{}\n{secret}\n", cmd.as_str()).ok()?;
     let mut text = String::new();
-    stream.read_to_string(&mut text).ok()?;
+    stream.take(1 << 20).read_to_string(&mut text).ok()?;
+    // A refused request is closed without a reply; an empty document would
+    // otherwise parse as a default status.
+    if text.trim().is_empty() {
+        return None;
+    }
     toml::from_str(&text).ok()
+}
+
+/// 32 random bytes as hex: what a caller has to know.
+fn new_secret() -> String {
+    let bytes: [u8; 32] = rand::random();
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Writes `port` and `secret` so that only the directory's user can read
+/// them. The macOS login window agent runs as root in the user's config
+/// directory: the file goes to the directory's owner, as the user's tray
+/// process has to read it.
+fn write_port_file(path: &Path, port: u16, secret: &str) -> io::Result<()> {
+    let Some(dir) = path.parent() else {
+        return Err(io::Error::other("port file without a directory"));
+    };
+    fs::create_dir_all(dir)?;
+    let tmp = path.with_extension("port.tmp");
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&tmp)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+        file.set_permissions(fs::Permissions::from_mode(0o600))?;
+        let owner = fs::metadata(dir)?;
+        if owner.uid() != unsafe { libc::geteuid() } {
+            std::os::unix::fs::fchown(&file, Some(owner.uid()), Some(owner.gid()))?;
+        }
+    }
+    write!(file, "{port}\n{secret}\n")?;
+    drop(file);
+    fs::rename(&tmp, path)
 }
 
 /// Starts answering commands on a loopback port and records that port.
@@ -121,15 +178,13 @@ where
 {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
     let port = listener.local_addr()?.port();
+    let secret = new_secret();
     if let Some(path) = endpoint.port_file() {
-        if let Some(dir) = path.parent() {
-            fs::create_dir_all(dir)?;
-        }
-        fs::write(path, port.to_string())?;
+        write_port_file(&path, port, &secret)?;
     }
     thread::Builder::new().name("control".into()).spawn(move || {
         for stream in listener.incoming().flatten() {
-            if let Err(e) = answer(stream, &handler) {
+            if let Err(e) = answer(stream, &secret, &handler) {
                 log::debug!("control request failed: {e}");
             }
         }
@@ -137,14 +192,22 @@ where
     Ok(port)
 }
 
-fn answer(stream: TcpStream, handler: &impl Fn(Command) -> Status) -> io::Result<()> {
+/// Answers one request; a wrong or missing secret closes the connection
+/// without a reply.
+fn answer(stream: TcpStream, secret: &str, handler: &impl Fn(Command) -> Status) -> io::Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
-    let mut reader = BufReader::new(stream.try_clone()?);
+    // Two short lines; a local process must not make this buffer grow.
+    let mut reader = BufReader::new(stream.try_clone()?.take(1024));
     let mut line = String::new();
     reader.read_line(&mut line)?;
     let Some(cmd) = Command::parse(&line) else {
         return Err(io::Error::other(format!("unknown command {line:?}")));
     };
+    let mut given = String::new();
+    reader.read_line(&mut given)?;
+    if !bool::from(given.trim().as_bytes().ct_eq(secret.as_bytes())) {
+        return Err(io::Error::other("wrong control secret"));
+    }
     let status = handler(cmd);
     let text = toml::to_string(&status).map_err(io::Error::other)?;
     let mut stream = stream;
@@ -171,9 +234,11 @@ mod tests {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let port = listener.local_addr().unwrap().port();
         let c = calls.clone();
+        let secret = new_secret();
+        let served = secret.clone();
         thread::spawn(move || {
             for stream in listener.incoming().flatten() {
-                answer(stream, &|cmd| {
+                let _ = answer(stream, &served, &|cmd| {
                     c.fetch_add(1, Ordering::SeqCst);
                     Status {
                         running: cmd == Command::Start,
@@ -181,16 +246,39 @@ mod tests {
                         error: Some("x".into()),
                         ..Default::default()
                     }
-                })
-                .unwrap();
+                });
             }
         });
-        let s = call_port(port, Command::Start).unwrap();
+        let s = call_port(port, &secret, Command::Start).unwrap();
         assert!(s.running);
         assert_eq!(s.viewers, ["10.0.0.1:1234"]);
         assert_eq!(s.error.as_deref(), Some("x"));
-        assert!(!call_port(port, Command::Status).unwrap().running);
+        assert!(!call_port(port, &secret, Command::Status).unwrap().running);
         assert_eq!(calls.load(Ordering::SeqCst), 2);
-        assert!(call_port(1, Command::Status).is_none());
+        // Without the secret nothing is answered and nothing is done.
+        assert!(call_port(port, "", Command::Quit).is_none());
+        assert!(call_port(port, &new_secret(), Command::Quit).is_none());
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert!(call_port(1, &secret, Command::Status).is_none());
+    }
+
+    #[test]
+    fn port_file_holds_port_and_private_secret() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("control.port");
+        write_port_file(&path, 4711, "s3cret").unwrap();
+        assert_eq!(read_port_file(&path), Some((4711, "s3cret".into())));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        // Files of older versions carry just the port.
+        fs::write(&path, "4712\n").unwrap();
+        assert_eq!(read_port_file(&path), Some((4712, String::new())));
+        fs::write(&path, "nope").unwrap();
+        assert_eq!(read_port_file(&path), None);
+        assert_eq!(new_secret().len(), 64);
+        assert_ne!(new_secret(), new_secret());
     }
 }

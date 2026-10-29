@@ -215,8 +215,15 @@ impl ZrleDecoder {
     /// Reads one ZRLE rectangle payload and returns its pixels as RGBA.
     pub fn decode(&mut self, r: &mut impl Read, pf: &PixelFormat, w: usize, h: usize) -> Result<Vec<u8>> {
         let len = r.u32()? as usize;
+        // The worst case for a tile is plain RLE with runs of one pixel
+        // (cpixel + 1 byte each) plus a palette; zlib adds little on top.
+        // Anything beyond that is a server trying to exhaust memory.
+        let limit = decoded_limit(w, h);
+        if len > limit {
+            return proto(format!("ZRLE payload of {len} bytes for a {w}×{h} rectangle"));
+        }
         let compressed = r.read_vec(len)?;
-        self.inflate(&compressed)?;
+        self.inflate(&compressed, limit)?;
 
         let mut rgba = vec![0u8; w * h * 4];
         let mut src = Cursor {
@@ -240,12 +247,18 @@ impl ZrleDecoder {
         Ok(rgba)
     }
 
-    fn inflate(&mut self, mut input: &[u8]) -> Result<()> {
+    /// Decompresses `input`; more than `limit` bytes of output is a
+    /// protocol error (a compression bomb).
+    fn inflate(&mut self, mut input: &[u8], limit: usize) -> Result<()> {
         self.data.clear();
-        self.data.reserve(input.len() * 4 + 1024);
+        self.data.reserve((input.len() * 4 + 1024).min(limit + 1));
         loop {
+            if self.data.len() > limit {
+                return proto("ZRLE data decompresses to more than the rectangle can hold");
+            }
             if self.data.len() == self.data.capacity() {
-                self.data.reserve(self.data.capacity());
+                self.data
+                    .reserve(self.data.capacity().min(limit + 1 - self.data.len()).max(1));
             }
             let before = self.zlib.total_in();
             let status = self
@@ -258,6 +271,12 @@ impl ZrleDecoder {
             }
         }
     }
+}
+
+/// Upper bound for the decompressed ZRLE data of a `w` × `h` rectangle.
+fn decoded_limit(w: usize, h: usize) -> usize {
+    let tiles = w.div_ceil(TILE) * h.div_ceil(TILE);
+    w * h * 5 + tiles * (1 + 128 * 4) + 1024
 }
 
 struct Cursor<'a> {
@@ -400,6 +419,43 @@ mod tests {
         roundtrip(&noisy, 130, 66, PixelFormat::BGRX);
         let stripes = image(130, 66, |x, _| [(x / 3) as u8, 0, (x / 3) as u8]);
         roundtrip(&stripes, 130, 66, PixelFormat::BGRX);
+    }
+
+    #[test]
+    fn refuses_oversized_payloads_and_compression_bombs() {
+        let pf = PixelFormat::BGRX;
+        // A length far beyond what a 4×4 rectangle can need isn't even read.
+        let mut dec = ZrleDecoder::new();
+        let huge = [0xff, 0xff, 0xff, 0xff];
+        assert!(dec.decode(&mut &huge[..], &pf, 4, 4).is_err());
+        // A valid stream that inflates to much more than the rectangle holds.
+        let bomb = {
+            let mut z = Compress::new(Compression::best(), true);
+            let zeros = vec![0u8; 1 << 20];
+            let mut input = &zeros[..];
+            let mut out = Vec::with_capacity(4096);
+            loop {
+                if out.len() == out.capacity() {
+                    out.reserve(4096);
+                }
+                let before = z.total_in();
+                z.compress_vec(input, &mut out, FlushCompress::Sync).unwrap();
+                input = &input[(z.total_in() - before) as usize..];
+                if input.is_empty() && out.len() < out.capacity() {
+                    break;
+                }
+            }
+            out
+        };
+        assert!(
+            bomb.len() < decoded_limit(4, 4),
+            "the test needs a small compressed bomb"
+        );
+        let mut payload = (bomb.len() as u32).to_be_bytes().to_vec();
+        payload.extend_from_slice(&bomb);
+        let mut dec = ZrleDecoder::new();
+        let err = dec.decode(&mut &payload[..], &pf, 4, 4).unwrap_err();
+        assert!(err.to_string().contains("decompresses"), "{err}");
     }
 
     #[test]

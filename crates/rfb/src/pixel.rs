@@ -96,8 +96,31 @@ impl PixelFormat {
         (self.bits_per_pixel as usize).div_ceil(8)
     }
 
+    /// Whether this format can be encoded and decoded here: true colour at
+    /// 8, 16 or 32 bits per pixel, with every colour channel inside the
+    /// pixel. Shifts and maxima come from the peer and are only used after
+    /// this check, so a hostile peer can't make the encoder shift out of
+    /// range or alias channels.
     pub fn is_supported(&self) -> bool {
-        self.true_color && matches!(self.bits_per_pixel, 8 | 16 | 32)
+        if !self.true_color || !matches!(self.bits_per_pixel, 8 | 16 | 32) {
+            return false;
+        }
+        if self.depth == 0 || self.depth > self.bits_per_pixel {
+            return false;
+        }
+        [
+            (self.red_max, self.red_shift),
+            (self.green_max, self.green_shift),
+            (self.blue_max, self.blue_shift),
+        ]
+        .iter()
+        .all(|&(max, shift)| {
+            // A channel's maximum is 2^n - 1 and the channel ends inside the pixel.
+            max > 0
+                && (max as u32 + 1).is_power_of_two()
+                && (shift as u32) < self.bits_per_pixel as u32
+                && (shift as u32) + (max as u32 + 1).trailing_zeros() <= self.bits_per_pixel as u32
+        })
     }
 
     /// Size of a ZRLE "compressed pixel" (RFC 6143 §7.7.6).
@@ -235,6 +258,35 @@ mod tests {
         green_shift: 5,
         blue_shift: 0,
     };
+
+    #[test]
+    fn rejects_hostile_formats() {
+        let mut pf = PixelFormat::BGRX;
+        assert!(pf.is_supported());
+        pf.red_shift = 32;
+        assert!(!pf.is_supported(), "shift past the pixel");
+        pf = PixelFormat::BGRX;
+        pf.red_shift = 200;
+        assert!(!pf.is_supported());
+        pf = PixelFormat::BGRX;
+        pf.green_max = 300;
+        assert!(!pf.is_supported(), "maximum isn't 2^n - 1");
+        pf = PixelFormat::BGRX;
+        pf.blue_max = 0;
+        assert!(!pf.is_supported());
+        pf = PixelFormat::RGB565;
+        pf.red_shift = 12;
+        assert!(!pf.is_supported(), "channel ends outside a 16-bit pixel");
+        pf = PixelFormat::BGRX;
+        pf.depth = 0;
+        assert!(!pf.is_supported());
+        pf = PixelFormat::BGRX;
+        pf.true_color = false;
+        assert!(!pf.is_supported());
+        let mut odd = PixelFormat::BGRX;
+        odd.bits_per_pixel = 24;
+        assert!(!odd.is_supported());
+    }
 
     #[test]
     fn roundtrips_through_wire() {

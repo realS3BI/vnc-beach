@@ -56,6 +56,9 @@ pub struct Release {
     pub page: String,
     /// Download URL of this platform's asset, if the release has one.
     pub asset: Option<String>,
+    /// SHA-256 of the asset as GitHub's API reports it (lowercase hex), so
+    /// the download is checked against what the API promised.
+    pub digest: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -74,6 +77,9 @@ struct ApiRelease {
 struct ApiAsset {
     name: String,
     browser_download_url: String,
+    /// `sha256:<hex>`, present for assets uploaded since 2025.
+    #[serde(default)]
+    digest: Option<String>,
 }
 
 /// This platform's asset name; `None` where self-update isn't supported.
@@ -95,17 +101,48 @@ fn parse_release(json: &[u8]) -> Result<Release, String> {
     }
     let version = Version::parse(&api.tag_name)
         .ok_or_else(|| format!("Unbekanntes Versionsformat {:?}.", api.tag_name))?;
-    let asset = asset_name().and_then(|name| {
-        api.assets
-            .into_iter()
-            .find(|a| a.name == name)
-            .map(|a| a.browser_download_url)
+    let asset = asset_name().and_then(|name| api.assets.into_iter().find(|a| a.name == name));
+    let digest = asset.as_ref().and_then(|a| {
+        a.digest
+            .as_deref()?
+            .strip_prefix("sha256:")
+            .filter(|hex| hex.len() == 64 && hex.chars().all(|c| c.is_ascii_hexdigit()))
+            .map(str::to_ascii_lowercase)
     });
+    let asset = asset.map(|a| a.browser_download_url);
+    if let Some(url) = &asset {
+        if !trusted_download_url(url) {
+            return Err(format!("Unerwartete Download-Adresse {url:?}."));
+        }
+    }
     Ok(Release {
         version,
         page: api.html_url,
         asset,
+        digest,
     })
+}
+
+/// Downloads come over HTTPS only. Tests against a local server set
+/// `VNC_BEACH_UPDATE_URL` and may use plain HTTP.
+fn trusted_download_url(url: &str) -> bool {
+    url.starts_with("https://")
+        || (std::env::var_os("VNC_BEACH_UPDATE_URL").is_some() && url.starts_with("http://"))
+}
+
+/// Fails unless `file` has the SHA-256 `digest` (lowercase hex).
+fn check_digest(file: &Path, digest: &str) -> Result<(), String> {
+    use sha2::Digest as _;
+    let bytes = std::fs::read(file).map_err(|e| e.to_string())?;
+    let actual: String = sha2::Sha256::digest(&bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    if actual == digest {
+        Ok(())
+    } else {
+        Err("Der Download ist beschädigt oder verändert (Prüfsumme stimmt nicht).".into())
+    }
 }
 
 fn latest_url() -> String {
@@ -144,7 +181,7 @@ pub fn install(release: &Release) -> Result<(), String> {
     let work = std::env::temp_dir().join(format!("vnc-beach-update-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
-    let result = platform::install(url, &work);
+    let result = platform::install(url, release.digest.as_deref(), &work);
     if result.is_err() {
         let _ = std::fs::remove_dir_all(&work);
     }
@@ -195,9 +232,24 @@ pub(crate) fn stop_background() -> bool {
     true
 }
 
-/// Downloads `url` to the file `to` with the system `curl`.
+/// Downloads `url` to the file `to` with the system `curl`. An HTTPS
+/// download may not be redirected to plain HTTP.
 pub(crate) fn download(url: &str, to: &Path) -> Result<(), String> {
-    curl(&["-o", &to.to_string_lossy(), url]).map(|_| ())
+    let to = to.to_string_lossy();
+    if url.starts_with("https://") {
+        curl(&["--proto-redir", "=https", "-o", &to, url]).map(|_| ())
+    } else {
+        curl(&["-o", &to, url]).map(|_| ())
+    }
+}
+
+/// Downloads `url` to `to` and checks it against `digest`, if there is one.
+pub(crate) fn download_checked(url: &str, digest: Option<&str>, to: &Path) -> Result<(), String> {
+    download(url, to)?;
+    if let Some(digest) = digest {
+        check_digest(to, digest)?;
+    }
+    Ok(())
 }
 
 /// Runs curl with redirects, retries and failure on HTTP errors; returns
@@ -263,10 +315,10 @@ mod platform {
         Ok(app.to_path_buf())
     }
 
-    pub fn install(url: &str, work: &Path) -> Result<(), String> {
+    pub fn install(url: &str, digest: Option<&str>, work: &Path) -> Result<(), String> {
         let app = target()?;
         let zip = work.join("update.zip");
-        super::download(url, &zip)?;
+        super::download_checked(url, digest, &zip)?;
         let extracted = work.join("extracted");
         run(Command::new("ditto")
             .arg("-x")
@@ -280,9 +332,23 @@ mod platform {
             .find(|p| p.extension().is_some_and(|e| e == "app"))
             .ok_or("Im Download steckt keine App.")?;
         run(Command::new("codesign")
-            .args(["--verify", "--deep"])
+            .args(["--verify", "--deep", "--strict"])
             .arg(&new_app))
         .map_err(|e| format!("Signatur des Updates ungültig: {e}"))?;
+        // A valid signature alone would accept anybody's app (even an ad hoc
+        // signed one): the update has to come from the same team as the
+        // running app.
+        if let Some(team) = team_identifier(&app) {
+            match team_identifier(&new_app) {
+                Some(other) if other == team => {}
+                other => {
+                    return Err(format!(
+                        "Das Update ist nicht von derselben Entwickler-ID signiert ({} statt {team}).",
+                        other.as_deref().unwrap_or("unsigniert")
+                    ))
+                }
+            }
+        }
 
         // Swap the bundles; the running process keeps its open files.
         let old = work.join("old.app");
@@ -303,6 +369,23 @@ mod platform {
             .spawn()
             .map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    /// The `TeamIdentifier` of a signed bundle; `None` for unsigned and ad
+    /// hoc signed ones.
+    fn team_identifier(app: &Path) -> Option<String> {
+        let out = Command::new("codesign").args(["-dvv"]).arg(app).output().ok()?;
+        // codesign prints the details on stderr.
+        parse_team_identifier(&String::from_utf8_lossy(&out.stderr))
+    }
+
+    fn parse_team_identifier(details: &str) -> Option<String> {
+        details
+            .lines()
+            .find_map(|l| l.strip_prefix("TeamIdentifier="))
+            .map(str::trim)
+            .filter(|t| !t.is_empty() && *t != "not set")
+            .map(str::to_string)
     }
 
     /// Rename, or copy and delete across volumes. Other rename errors (read
@@ -336,6 +419,20 @@ mod platform {
             }
         }
     }
+
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn reads_team_identifier() {
+            let details = "Executable=/x\nIdentifier=at.schlossers.vnc-beach\nTeamIdentifier=ABCDE12345\n";
+            assert_eq!(
+                super::parse_team_identifier(details).as_deref(),
+                Some("ABCDE12345")
+            );
+            assert_eq!(super::parse_team_identifier("TeamIdentifier=not set\n"), None);
+            assert_eq!(super::parse_team_identifier("Signature=adhoc\n"), None);
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -358,10 +455,10 @@ mod platform {
         exe.with_extension("exe.old")
     }
 
-    pub fn install(url: &str, work: &Path) -> Result<(), String> {
+    pub fn install(url: &str, digest: Option<&str>, work: &Path) -> Result<(), String> {
         let exe = target()?;
         let download = work.join("vnc-beach.exe");
-        super::download(url, &download)?;
+        super::download_checked(url, digest, &download)?;
         let bytes = std::fs::read(&download).map_err(|e| e.to_string())?;
         if bytes.len() < 1_000_000 || !bytes.starts_with(b"MZ") {
             return Err("Der Download ist keine gültige Programmdatei.".into());
@@ -404,7 +501,7 @@ mod platform {
         Err("Selbst-Update gibt es nur unter macOS und Windows.".into())
     }
 
-    pub fn install(_url: &str, _work: &Path) -> Result<(), String> {
+    pub fn install(_url: &str, _digest: Option<&str>, _work: &Path) -> Result<(), String> {
         target().map(|_| ())
     }
 
@@ -433,17 +530,22 @@ mod tests {
         assert!(is_translocated(Path::new(
             "/private/var/folders/qr/x/T/AppTranslocation/8B1B/d/VNC Beach.app/Contents/MacOS/vnc-beach"
         )));
-        assert!(!is_translocated(Path::new("/Applications/VNC Beach.app/Contents/MacOS/vnc-beach")));
-        assert!(!is_translocated(Path::new("/Users/x/AppTranslocation.app/Contents/MacOS/vnc-beach")));
+        assert!(!is_translocated(Path::new(
+            "/Applications/VNC Beach.app/Contents/MacOS/vnc-beach"
+        )));
+        assert!(!is_translocated(Path::new(
+            "/Users/x/AppTranslocation.app/Contents/MacOS/vnc-beach"
+        )));
     }
 
     #[test]
     fn reads_github_release() {
+        let sha = "a".repeat(64);
         let json = format!(
             r#"{{"tag_name":"v9.0.1","html_url":"https://example.org/r","draft":false,"prerelease":false,
                 "assets":[{{"name":"other.txt","browser_download_url":"https://example.org/o"}},
-                          {{"name":"{MACOS_ASSET}","browser_download_url":"https://example.org/mac"}},
-                          {{"name":"{WINDOWS_ASSET}","browser_download_url":"https://example.org/win"}}]}}"#
+                          {{"name":"{MACOS_ASSET}","browser_download_url":"https://example.org/mac","digest":"sha256:{sha}"}},
+                          {{"name":"{WINDOWS_ASSET}","browser_download_url":"https://example.org/win","digest":"sha256:{sha}"}}]}}"#
         );
         let r = parse_release(json.as_bytes()).unwrap();
         assert_eq!(r.version, Version(9, 0, 1));
@@ -456,11 +558,32 @@ mod tests {
             None
         };
         assert_eq!(r.asset, expected);
+        assert_eq!(r.digest.is_some(), expected.is_some());
         assert!(is_newer(&r));
+        // A download address that isn't HTTPS is refused with the release.
+        if asset_name().is_some() {
+            let plain = json
+                .replace("https://example.org/mac", "http://example.org/mac")
+                .replace("https://example.org/win", "http://example.org/win");
+            assert!(parse_release(plain.as_bytes()).is_err());
+            // An odd digest is ignored rather than trusted.
+            let odd = json.replace(&format!("sha256:{sha}"), "md5:abc");
+            assert_eq!(parse_release(odd.as_bytes()).unwrap().digest, None);
+        }
 
         let draft = r#"{"tag_name":"v9.0.0","html_url":"x","draft":true,"assets":[]}"#;
         assert!(parse_release(draft.as_bytes()).is_err());
         let old = r#"{"tag_name":"v0.0.1","html_url":"x","assets":[]}"#;
         assert!(!is_newer(&parse_release(old.as_bytes()).unwrap()));
+    }
+
+    #[test]
+    fn downloads_are_checked_against_the_digest() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("asset");
+        std::fs::write(&file, b"hello").unwrap();
+        let good = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+        assert!(check_digest(&file, good).is_ok());
+        assert!(check_digest(&file, &"0".repeat(64)).is_err());
     }
 }

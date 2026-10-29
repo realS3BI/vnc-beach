@@ -13,6 +13,7 @@ pub mod input;
 pub mod keymap;
 pub mod permissions;
 pub mod session;
+pub mod throttle;
 
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -111,6 +112,7 @@ impl Server {
             home: opts.home,
             password: opts.password,
             tickets: opts.tickets,
+            throttle: throttle::Throttle::default(),
             fps: opts.fps,
             name: opts.name.unwrap_or_else(|| {
                 format!(
@@ -238,11 +240,19 @@ pub fn displays() -> anyhow::Result<Vec<String>> {
 /// Eight characters without look-alikes, for a generated VNC password.
 pub fn random_password() -> String {
     const ALPHABET: &[u8] = b"abcdefghjkmnpqrstuvwxyz23456789";
-    let seed = std::collections::hash_map::RandomState::new();
-    (0..8u64)
-        .map(|i| {
-            use std::hash::BuildHasher;
-            ALPHABET[(seed.hash_one(i) % ALPHABET.len() as u64) as usize] as char
-        })
+    (0..8)
+        .map(|_| ALPHABET[rand::random_range(0..ALPHABET.len())] as char)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn generated_passwords_are_eight_distinct_characters_from_the_alphabet() {
+        let a = super::random_password();
+        let b = super::random_password();
+        assert_eq!(a.len(), 8);
+        assert!(a.bytes().all(|c| b"abcdefghjkmnpqrstuvwxyz23456789".contains(&c)));
+        assert_ne!(a, b);
+    }
 }

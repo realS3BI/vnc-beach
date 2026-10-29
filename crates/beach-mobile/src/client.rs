@@ -313,6 +313,10 @@ impl Reader {
     /// or layout.
     fn apply(&mut self, r: Rect) -> rfb::Result<bool> {
         let (x, y, w, h) = (r.x as usize, r.y as usize, r.width as usize, r.height as usize);
+        if r.encoding == encoding::DESKTOP_SIZE || r.encoding == encoding::EXTENDED_DESKTOP_SIZE {
+            // Both may reallocate the framebuffer at the announced size.
+            rfb::check_framebuffer_size(r.width, r.height)?;
+        }
         if r.encoding == encoding::DESKTOP_SIZE {
             *self.fb.lock().unwrap() = Framebuffer::new(w, h);
             *self.region.lock().unwrap() = None;

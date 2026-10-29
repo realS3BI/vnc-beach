@@ -1,11 +1,13 @@
 //! The browser side: sign-in, the overview of one's devices and
 //! organizations, and managing members and invitation links. Plain HTML
-//! forms, no JavaScript beyond confirmation prompts.
+//! forms, no JavaScript beyond confirmation prompts (in `app.js`, so the
+//! content security policy can forbid inline scripts).
 
 use std::fmt::Write as _;
 
-use axum::extract::{Form, Path, Query, State};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::extract::{Form, Path, Query, Request, State};
+use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
+use axum::middleware::Next;
 use axum::response::{AppendHeaders, Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::Router;
@@ -38,9 +40,60 @@ pub fn routes() -> Router<Shared> {
         .route("/devices/{id}/delete", post(delete_device))
         .route("/invite/{token}", get(invite_page).post(accept_invite))
         .route("/style.css", get(style))
+        .route("/app.js", get(script))
         .route("/favicon.svg", get(favicon_svg))
         .route("/favicon.ico", get(favicon_ico))
         .route("/apple-touch-icon.png", get(apple_touch_icon))
+}
+
+/// Runs around every request: turns cross-site form posts away (the session
+/// cookie is `SameSite=Lax`, this is the second line) and adds the security
+/// headers to every answer. HTML is never cached, since pages show
+/// invitation links and sign-in codes.
+pub async fn protect(State(app): State<Shared>, request: Request, next: Next) -> Response {
+    if request.method() != Method::GET && request.method() != Method::HEAD {
+        let cross_site = request
+            .headers()
+            .get("sec-fetch-site")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v == "cross-site");
+        if cross_site {
+            return Error(
+                StatusCode::FORBIDDEN,
+                "Diese Aktion kann nur von dieser Website aus ausgelöst werden.".into(),
+            )
+            .into_response();
+        }
+    }
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    let fixed = [
+        (
+            header::CONTENT_SECURITY_POLICY,
+            "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; \
+             font-src 'self'; form-action 'self' http://127.0.0.1:*; frame-ancestors 'none'; base-uri 'none'",
+        ),
+        (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        (header::X_FRAME_OPTIONS, "DENY"),
+        (header::REFERRER_POLICY, "same-origin"),
+    ];
+    for (name, value) in fixed {
+        headers.insert(name, HeaderValue::from_static(value));
+    }
+    if app.secure() {
+        headers.insert(
+            header::STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_static("max-age=31536000"),
+        );
+    }
+    let html = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("text/html"));
+    if html && !headers.contains_key(header::CACHE_CONTROL) {
+        headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    }
+    response
 }
 
 // Errors
@@ -459,9 +512,9 @@ fn device_table(devices: &[Device], removable: impl Fn(&Device) -> bool) -> Stri
         };
         let remove = if removable(d) {
             format!(
-                r#"<form method="post" action="/devices/{}/delete" onsubmit="return confirm('{} wirklich entfernen? Danach ist das Gerät über das Konto nicht mehr erreichbar.')"><button class="link danger">Entfernen</button></form>"#,
+                r#"<form method="post" action="/devices/{}/delete" data-confirm="{} wirklich entfernen? Danach ist das Gerät über das Konto nicht mehr erreichbar."><button class="link danger">Entfernen</button></form>"#,
                 esc(&d.id),
-                esc(&js(&d.name))
+                esc(&d.name)
             )
         } else {
             String::new()
@@ -592,8 +645,8 @@ fn org_body(app: &App, db: &Db, org: &Org, user: &User, new_link: Option<(&str, 
                 )
             };
             format!(
-                r#"<form method="post" action="/orgs/{oid}/members/{uid}/remove" onsubmit="return confirm('{}')"><button class="link danger">{label}</button></form>"#,
-                esc(&js(&question))
+                r#"<form method="post" action="/orgs/{oid}/members/{uid}/remove" data-confirm="{}"><button class="link danger">{label}</button></form>"#,
+                esc(&question)
             )
         } else {
             String::new()
@@ -618,7 +671,7 @@ fn org_body(app: &App, db: &Db, org: &Org, user: &User, new_link: Option<(&str, 
         if let Some((token, role)) = new_link {
             let _ = write!(
                 body,
-                r#"<div class="notice"><p><strong>Neuer Einladungslink als {}.</strong> Er wird nur jetzt angezeigt, gilt 7 Tage und funktioniert einmal.</p><input class="copy" readonly value="{}/invite/{}" onclick="this.select()"></div>"#,
+                r#"<div class="notice"><p><strong>Neuer Einladungslink als {}.</strong> Er wird nur jetzt angezeigt, gilt 7 Tage und funktioniert einmal.</p><input class="copy" readonly value="{}/invite/{}" data-select></div>"#,
                 role_label(role),
                 esc(&app.public_url),
                 esc(token)
@@ -935,7 +988,7 @@ fn page(title: &str, user: Option<&User>, body: &str) -> String {
 <html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{} · VNC Beach</title><link rel="stylesheet" href="/style.css">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png"></head>
+<link rel="apple-touch-icon" href="/apple-touch-icon.png"><script src="/app.js" defer></script></head>
 <body><header><a class="brand" href="/">VNC Beach <span>Konto</span></a>{account}</header>
 <main>{body}</main>
 <footer>VNC Beach ist Open Source · <a href="{REPO}">Quellcode</a> · diesen Server kann jeder selbst betreiben</footer>
@@ -947,6 +1000,22 @@ fn page(title: &str, user: Option<&User>, body: &str) -> String {
 async fn style() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], STYLE)
 }
+
+async fn script() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], SCRIPT)
+}
+
+/// Confirmation prompts for forms with `data-confirm`, and click-to-select
+/// for inputs with `data-select`.
+const SCRIPT: &str = r#"
+document.addEventListener('submit', function (e) {
+  var q = e.target.getAttribute('data-confirm');
+  if (q && !window.confirm(q)) { e.preventDefault(); }
+});
+document.addEventListener('click', function (e) {
+  if (e.target.hasAttribute && e.target.hasAttribute('data-select')) { e.target.select(); }
+});
+"#;
 
 // The same icons as the landing page in docs/.
 const CACHE_ICON: (header::HeaderName, &str) = (header::CACHE_CONTROL, "public, max-age=86400");
@@ -1032,11 +1101,6 @@ pub fn esc(text: &str) -> String {
         }
     }
     out
-}
-
-/// Escapes for a single-quoted JavaScript string (then HTML-escaped).
-fn js(text: &str) -> String {
-    text.replace('\\', "\\\\").replace('\'', "\\'")
 }
 
 fn urlencode(text: &str) -> String {
@@ -1288,6 +1352,47 @@ mod tests {
         let (_, _, html) = send(&app, get("/", Some(&alice))).await;
         assert!(html.contains("&lt;script&gt;"));
         assert!(!html.contains("<script>"));
+    }
+
+    #[tokio::test]
+    async fn answers_carry_security_headers_and_refuse_cross_site_posts() {
+        let app = crate::test_app();
+        let (status, headers, _) = send(&app, get("/login", None)).await;
+        assert_eq!(status, StatusCode::OK);
+        let csp = headers[header::CONTENT_SECURITY_POLICY].to_str().unwrap();
+        assert!(csp.contains("script-src 'self'"), "{csp}");
+        assert!(csp.contains("frame-ancestors 'none'"), "{csp}");
+        assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+        assert_eq!(headers[header::X_FRAME_OPTIONS], "DENY");
+        assert_eq!(headers[header::CACHE_CONTROL], "no-store");
+        assert!(
+            !headers.contains_key(header::STRICT_TRANSPORT_SECURITY),
+            "test app is plain HTTP"
+        );
+        // Icons keep their own cache header; the script is served for the CSP.
+        let (_, headers, _) = send(&app, get("/favicon.svg", None)).await;
+        assert_eq!(headers[header::CACHE_CONTROL], "public, max-age=86400");
+        let (status, _, js) = send(&app, get("/app.js", None)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(js.contains("data-confirm"));
+
+        let (alice, _) = dev_sign_in(&app, "Alice", "").await;
+        let mut req = post("/orgs", Some(&alice), "name=Team");
+        req.headers_mut()
+            .insert("sec-fetch-site", "cross-site".parse().unwrap());
+        let (status, _, _) = send(&app, req).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let mut req = post("/orgs", Some(&alice), "name=Team");
+        req.headers_mut()
+            .insert("sec-fetch-site", "same-origin".parse().unwrap());
+        let (status, _, _) = send(&app, req).await;
+        assert!(status.is_redirection());
+        // No inline event handlers anywhere, so the CSP can forbid them.
+        let (_, _, html) = send(&app, get("/", Some(&alice))).await;
+        assert!(
+            !html.contains("onsubmit=") && !html.contains("onclick="),
+            "{html}"
+        );
     }
 
     #[test]

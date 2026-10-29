@@ -33,6 +33,19 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Largest framebuffer a client allocates for a server: 64 million pixels
+/// (256 MiB of RGBA), room for three 5K displays. The RFB size fields allow
+/// 65535 × 65535, which a hostile server could use to exhaust memory.
+pub const MAX_FRAMEBUFFER_PIXELS: usize = 64 << 20;
+
+/// Rejects framebuffer sizes a viewer must not allocate.
+pub fn check_framebuffer_size(width: u16, height: u16) -> Result<()> {
+    if width as usize * height as usize > MAX_FRAMEBUFFER_PIXELS {
+        return proto(format!("framebuffer {width}×{height} is too large"));
+    }
+    Ok(())
+}
+
 pub(crate) fn proto<T>(msg: impl Into<String>) -> Result<T> {
     Err(Error::Protocol(msg.into()))
 }

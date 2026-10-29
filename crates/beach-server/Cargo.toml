@@ -13,6 +13,7 @@ enigo = "0.6.1"
 env_logger = "0.11.11"
 gethostname = "1.1.0"
 log = "0.4.34"
+rand = "0.10.3"
 rfb = { version = "0.3.2", path = "../rfb" }
 beach-account = { version = "0.3.2", path = "../beach-account" }
 tempfile = "3.27"

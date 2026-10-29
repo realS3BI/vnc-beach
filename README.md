@@ -203,7 +203,7 @@ Der Server steckt im Viewer, auf Windows und auf dem Mac. `vnc-beach.exe --backg
 
 In der Übersicht zeigt die Karte „Dieser Computer“ denselben Stand samt Passwort und Kontoverknüpfung. „Einstellungen …“ öffnet den gleichnamigen Bereich im Einstellungsfenster. Er setzt Passwort (beim ersten Start wird eines erzeugt), Port, Bildschirme (alle, nur der Hauptbildschirm oder ein bestimmter; `display = "all" | "primary" | 1` in `config.toml`), Bilder pro Sekunde, „Nur ansehen", ob der Server überhaupt läuft und ob der Hintergrunddienst beim Anmelden startet (Windows: Registry-Eintrag `HKCU\…\Run\VNC Beach`, macOS: LaunchAgent). Läuft kein Hintergrunddienst, bietet der Viewer an, ihn zu starten.
 
-Viewer und Hintergrunddienst sind getrennte Prozesse. Sie reden über einen Port auf `127.0.0.1`, den der Dienst in `%APPDATA%\vnc-beach\control.port` ablegt; die Server-Einstellungen liegen in `config.toml` unter `[server]`. Der Hintergrunddienst startet erst nach dem Anmelden, nicht schon am Anmeldebildschirm.
+Viewer und Hintergrunddienst sind getrennte Prozesse. Sie reden über einen Port auf `127.0.0.1`, den der Dienst zusammen mit einem zufälligen Geheimnis in `%APPDATA%\vnc-beach\control.port` ablegt (nur für den eigenen Benutzer lesbar); ohne dieses Geheimnis antwortet der Dienst nicht, denn die Antwort enthält das VNC-Passwort. Die Server-Einstellungen liegen in `config.toml` unter `[server]`. Der Hintergrunddienst startet erst nach dem Anmelden, nicht schon am Anmeldebildschirm.
 
 #### Vor der Anmeldung erreichbar (Windows und Mac)
 
@@ -276,6 +276,8 @@ Klassisches VNC verschlüsselt den Bildschirminhalt nicht, und die VNC-Passwort-
 - den Port nie direkt ins Internet freigeben
 - `--no-password` nur in vertrauenswürdigen Netzen
 - Das Konto ersetzt das Passwort für VNC-Beach-Viewer, nicht die Verschlüsselung: Wer den Koordinationsserver samt `ticket-key` kontrolliert, kann sich mit allen dort angemeldeten Geräten verbinden. Im Zweifel selbst betreiben.
+
+Was der Server selbst tut: Nach einem falschen Passwort weist er die Adresse des Viewers 10 Sekunden lang ab, bei jedem weiteren Fehlversuch doppelt so lange (höchstens 10 Minuten); der Viewer sieht den Grund statt einer Passwortabfrage. Ein Viewer hat 30 Sekunden für den Handshake. Verbindungen über das Konto nehmen nie einen Server ohne Authentifizierung an, damit niemand, der die Adresse eines Geräts übernimmt, Tastatureingaben abfängt. Der Viewer prüft Updates gegen die von GitHub gemeldete Prüfsumme und auf dem Mac zusätzlich gegen die Entwickler-ID der laufenden App.
 
 ## Roadmap
 

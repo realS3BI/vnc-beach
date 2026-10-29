@@ -2,6 +2,8 @@
 
 use std::io::{Read, Write};
 
+use subtle::ConstantTimeEq as _;
+
 use crate::auth::{random_challenge, vnc_response, CHALLENGE_LEN};
 use crate::io::{ReadExt, WriteExt};
 use crate::{proto, Error, PixelFormat, Result};
@@ -73,6 +75,7 @@ impl ServerInit {
     fn read(r: &mut impl Read) -> Result<Self> {
         let width = r.u16()?;
         let height = r.u16()?;
+        crate::check_framebuffer_size(width, height)?;
         let pixel_format = PixelFormat::read(r)?;
         let len = r.u32()? as usize;
         if len > 1 << 16 {
@@ -110,7 +113,10 @@ pub fn server_handshake<S: Read + Write>(
     password: Option<&str>,
     init: &ServerInit,
 ) -> Result<(Version, ClientInit)> {
-    let security = ServerSecurity { password, tickets: None };
+    let security = ServerSecurity {
+        password,
+        tickets: None,
+    };
     server_handshake_secure(s, &security, init).map(|(version, client, _)| (version, client))
 }
 
@@ -188,7 +194,7 @@ pub fn server_handshake_secure<S: Read + Write>(
             s.flush()?;
             let mut response = [0; CHALLENGE_LEN];
             s.read_exact(&mut response)?;
-            if response != vnc_response(password, &challenge) {
+            if !bool::from(response.ct_eq(&vnc_response(password, &challenge))) {
                 fail(s, version, "wrong password")?;
                 return Err(Error::AuthFailed("wrong password".into()));
             }
@@ -239,6 +245,27 @@ fn fail(w: &mut impl Write, version: Version, reason: &str) -> Result<()> {
     Ok(())
 }
 
+/// Turns a viewer away before any authentication, with `reason`: the
+/// version exchange runs, then the server offers no security type (RFC 6143
+/// §7.1.2), so the viewer shows the reason instead of a password prompt.
+/// Used for peers that failed too often (see `beach-server`).
+pub fn server_refuse<S: Read + Write>(s: &mut S, reason: &str) -> Result<()> {
+    s.write_all(Version::V3_8.banner())?;
+    s.flush()?;
+    let mut banner = [0; 12];
+    s.read_exact(&mut banner)?;
+    let version = Version::parse(&banner)?;
+    if version == Version::V3_3 {
+        s.put_u32(0)?;
+    } else {
+        s.put_u8(0)?;
+    }
+    s.put_u32(reason.len() as u32)?;
+    s.write_all(reason.as_bytes())?;
+    s.flush()?;
+    Ok(())
+}
+
 /// Runs the client side of the handshake. Returns [`Error::PasswordRequired`]
 /// if the server wants VNC authentication and `password` is `None`.
 pub fn client_handshake<S: Read + Write>(s: &mut S, password: Option<&str>) -> Result<ServerInit> {
@@ -257,10 +284,14 @@ pub fn client_handshake_with_banner<S: Read + Write>(
 
 /// Fetches an account ticket for the device the server announced and the
 /// server's nonce, e.g. from the coordination server.
-pub type TicketSource<'a> = &'a mut dyn FnMut(&str, &[u8; TICKET_NONCE_LEN]) -> std::result::Result<Vec<u8>, String>;
+pub type TicketSource<'a> =
+    &'a mut dyn FnMut(&str, &[u8; TICKET_NONCE_LEN]) -> std::result::Result<Vec<u8>, String>;
 
 /// Like [`client_handshake_with_banner`]; with `tickets`, an account ticket
-/// is preferred whenever the server offers that.
+/// is preferred whenever the server offers that. A connection made through
+/// an account never falls back to "no authentication": a host that took the
+/// device's address must not get the viewer's keystrokes for free. The
+/// VNC password, if any, stays a fallback for servers without tickets.
 pub fn client_handshake_secure<S: Read + Write>(
     s: &mut S,
     password: Option<&str>,
@@ -285,7 +316,7 @@ pub fn client_handshake_secure<S: Read + Write>(
         let types = s.read_vec(n)?;
         let chosen = if tickets.is_some() && types.contains(&SECURITY_BEACH_TICKET) {
             SECURITY_BEACH_TICKET
-        } else if types.contains(&SECURITY_NONE) {
+        } else if tickets.is_none() && types.contains(&SECURITY_NONE) {
             SECURITY_NONE
         } else if types.contains(&SECURITY_VNC) {
             SECURITY_VNC
@@ -298,6 +329,10 @@ pub fn client_handshake_secure<S: Read + Write>(
     };
 
     match security {
+        SECURITY_NONE if tickets.is_some() => {
+            // A 3.3 server picked it: see above.
+            return Err(Error::UnsupportedSecurity(vec![security]));
+        }
         SECURITY_NONE => {}
         SECURITY_VNC => {
             let password = password.ok_or(Error::PasswordRequired)?;
@@ -433,7 +468,11 @@ mod tests {
             "dev-1"
         }
 
-        fn verify(&self, nonce: &[u8; TICKET_NONCE_LEN], ticket: &[u8]) -> std::result::Result<Grant, String> {
+        fn verify(
+            &self,
+            nonce: &[u8; TICKET_NONCE_LEN],
+            ticket: &[u8],
+        ) -> std::result::Result<Grant, String> {
             if ticket == fake_ticket(nonce).as_slice() {
                 Ok(Grant {
                     user: "alice".into(),
@@ -451,7 +490,10 @@ mod tests {
     }
 
     type MakeTicket = fn(&str, &[u8; TICKET_NONCE_LEN]) -> std::result::Result<Vec<u8>, String>;
-    type Outcome = (Result<(ServerInit, String)>, Result<(Version, ClientInit, Option<Grant>)>);
+    type Outcome = (
+        Result<(ServerInit, String)>,
+        Result<(Version, ClientInit, Option<Grant>)>,
+    );
 
     fn run_tickets(
         password: Option<&'static str>,
@@ -519,6 +561,55 @@ mod tests {
         let (c, s) = run_tickets(Some("secret"), Some("secret"), None);
         assert!(c.is_ok());
         assert_eq!(s.unwrap().2, None);
+    }
+
+    #[test]
+    fn account_connections_never_accept_no_authentication() {
+        // A host at the device's address that offers "None" only.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            server_handshake(&mut s, None, &init())
+        });
+        let mut c = TcpStream::connect(addr).unwrap();
+        let mut source = |_: &str, nonce: &[u8; TICKET_NONCE_LEN]| Ok(fake_ticket(nonce));
+        let result = client_handshake_secure(&mut c, None, Some(&mut source));
+        assert!(matches!(result, Err(Error::UnsupportedSecurity(t)) if t == [SECURITY_NONE]));
+        drop(c);
+        assert!(server.join().unwrap().is_err());
+        // Without an account the same server is fine.
+        let (c, _) = run(None, None);
+        assert!(c.is_ok());
+    }
+
+    #[test]
+    fn refused_viewers_see_the_reason() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            server_refuse(&mut s, "too many failed attempts").unwrap();
+        });
+        let mut c = TcpStream::connect(addr).unwrap();
+        let result = client_handshake(&mut c, Some("secret"));
+        assert!(matches!(result, Err(Error::AuthFailed(r)) if r == "too many failed attempts"));
+    }
+
+    #[test]
+    fn rejects_absurd_framebuffer_sizes() {
+        let mut b = Vec::new();
+        b.put_u16(65535).unwrap();
+        b.put_u16(65535).unwrap();
+        PixelFormat::BGRX.write(&mut b).unwrap();
+        b.put_u32(0).unwrap();
+        assert!(ServerInit::read(&mut &b[..]).is_err());
+        let mut b = Vec::new();
+        b.put_u16(7680).unwrap();
+        b.put_u16(4320).unwrap();
+        PixelFormat::BGRX.write(&mut b).unwrap();
+        b.put_u32(0).unwrap();
+        assert!(ServerInit::read(&mut &b[..]).is_ok());
     }
 
     #[test]

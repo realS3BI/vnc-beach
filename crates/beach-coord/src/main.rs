@@ -151,7 +151,10 @@ async fn main() -> anyhow::Result<()> {
 }
 
 pub fn router(app: Shared) -> axum::Router {
-    web::routes().merge(api::routes()).with_state(app)
+    web::routes()
+        .merge(api::routes())
+        .layer(axum::middleware::from_fn_with_state(app.clone(), web::protect))
+        .with_state(app)
 }
 
 /// The Ed25519 key tickets are signed with. Devices pin its public half

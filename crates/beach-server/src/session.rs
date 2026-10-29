@@ -7,7 +7,6 @@ use std::sync::mpsc::{sync_channel, RecvTimeoutError};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Context as _;
 use rfb::encoding;
 use rfb::handshake::{server_handshake_secure, ServerInit, ServerSecurity};
 use rfb::messages::{self, ClientMessage, Rect};
@@ -25,6 +24,8 @@ pub struct Context {
     pub password: Option<String>,
     /// Accepts VNC Beach account tickets next to the password.
     pub tickets: Option<beach_account::ticket::Verifier>,
+    /// Turns peers away that failed to authenticate too often.
+    pub throttle: crate::throttle::Throttle,
     pub file_transfer: bool,
     /// Shows viewers' webcams as a camera here; `None` where unsupported.
     pub camera: Option<Arc<crate::camera::Hub>>,
@@ -38,9 +39,26 @@ pub struct Context {
 
 const TILE: usize = 64;
 
+/// A viewer has this long for the handshake. Without it, a connection
+/// that never sends anything would hold its thread (and a capture
+/// subscription) forever.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+
 pub fn run(stream: TcpStream, ctx: &Context) -> anyhow::Result<()> {
     stream.set_nodelay(true)?;
     stream.set_write_timeout(Some(Duration::from_secs(15)))?;
+    stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
+    let peer = stream.peer_addr()?.ip();
+    if let Some(wait) = ctx.throttle.blocked(peer) {
+        let secs = wait.as_secs().max(1);
+        log::warn!("{peer}: refused, blocked for {secs}s after failed sign-ins");
+        let mut handshake_stream = stream.try_clone()?;
+        let _ = rfb::handshake::server_refuse(
+            &mut handshake_stream,
+            &format!("too many failed sign-ins; try again in {secs} seconds"),
+        );
+        anyhow::bail!("peer is blocked after failed sign-ins");
+    }
     let _watch = ctx.screen.watch();
     let frame = ctx.screen.latest();
     let init = ServerInit {
@@ -52,9 +70,22 @@ pub fn run(stream: TcpStream, ctx: &Context) -> anyhow::Result<()> {
     let mut handshake_stream = stream.try_clone()?;
     let security = ServerSecurity {
         password: ctx.password.as_deref(),
-        tickets: ctx.tickets.as_ref().map(|v| v as &dyn rfb::handshake::TicketVerifier),
+        tickets: ctx
+            .tickets
+            .as_ref()
+            .map(|v| v as &dyn rfb::handshake::TicketVerifier),
     };
-    let (_, _, grant) = server_handshake_secure(&mut handshake_stream, &security, &init).context("handshake")?;
+    let (_, _, grant) = match server_handshake_secure(&mut handshake_stream, &security, &init) {
+        Ok(done) => done,
+        Err(e @ rfb::Error::AuthFailed(_)) => {
+            let block = ctx.throttle.failed(peer);
+            log::warn!("{peer}: {e}; blocked for {}s", block.as_secs());
+            return Err(anyhow::Error::from(e).context("handshake"));
+        }
+        Err(e) => return Err(anyhow::Error::from(e).context("handshake")),
+    };
+    ctx.throttle.succeeded(peer);
+    stream.set_read_timeout(None)?;
     if let Some(grant) = &grant {
         log::info!("signed in with the account of {}", grant.user);
     }
@@ -397,7 +428,8 @@ impl Session {
             }
             .write(&mut self.out)?;
             if self.use_zrle {
-                self.out.write_all(&self.zrle.encode(&self.pf, region, stride, w, h))?;
+                self.out
+                    .write_all(&self.zrle.encode(&self.pf, region, stride, w, h))?;
             } else {
                 buf.clear();
                 self.pf.encode_rgba(region, stride, w, h, &mut buf);
