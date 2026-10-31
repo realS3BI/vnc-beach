@@ -111,7 +111,8 @@ impl Server {
             camera: if opts.view_only { None } else { camera::Hub::new() },
             home: opts.home,
             password: opts.password,
-            tickets: opts.tickets,
+            tickets: std::sync::RwLock::new(opts.tickets),
+            enroller: std::sync::RwLock::new(None),
             throttle: throttle::Throttle::default(),
             fps: opts.fps,
             name: opts.name.unwrap_or_else(|| {
@@ -155,6 +156,17 @@ impl Server {
 
     pub fn password(&self) -> Option<&str> {
         self.ctx.password.as_deref()
+    }
+
+    /// Replaces the accepted account tickets without disconnecting anyone
+    /// (after this computer was added to or removed from an account).
+    pub fn set_tickets(&self, tickets: Option<beach_account::ticket::Verifier>) {
+        *self.ctx.tickets.write().unwrap() = tickets;
+    }
+
+    /// Lets viewers add this computer to an account (`rfb::enroll`).
+    pub fn set_enroller(&self, enroller: Arc<dyn session::Enroller>) {
+        *self.ctx.enroller.write().unwrap() = Some(enroller);
     }
 
     /// Stops accepting, disconnects viewers and ends the capture.

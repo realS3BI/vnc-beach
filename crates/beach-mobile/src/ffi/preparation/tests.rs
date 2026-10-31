@@ -17,6 +17,8 @@ fn start(
             CString::new(address).unwrap().as_ptr(),
             std::ptr::null(),
             CString::new(config).unwrap().as_ptr(),
+            std::ptr::null(),
+            None,
             action,
             std::ptr::null(),
             24,
@@ -157,4 +159,108 @@ fn stale_or_wrong_prompt_answers_cannot_consume_the_current_question() {
         panic!("wrong answer kind")
     };
     assert_eq!(&*secret, "secret");
+}
+
+const TICKET_KEY: [u8; 32] = [7; 32];
+
+/// Stands in for the app's URLSession: signs a ticket like the coordination server.
+unsafe extern "C" fn sign_ticket(
+    url: *const c_char,
+    token: *const c_char,
+    body: *const c_char,
+    answer: *mut c_char,
+    answer_len: usize,
+) -> i32 {
+    let (url, token, body) = unsafe { (c_str(url).unwrap(), c_str(token).unwrap(), c_str(body).unwrap()) };
+    assert_eq!(url, "https://coord.test/api/devices/dev1/ticket");
+    assert_eq!(token, "session");
+    let req: beach_account::api::TicketRequest = serde_json::from_str(body).unwrap();
+    let nonce = beach_account::unb64(&req.nonce).unwrap();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+    let claims = beach_account::ticket::Claims::new("dev1", "u1", "Alice", &nonce, now);
+    let ticket = beach_account::ticket::sign(&beach_account::SigningKey::from_bytes(&TICKET_KEY), &claims);
+    unsafe { fill(answer, answer_len, &serde_json::json!({ "ticket": ticket }).to_string()) };
+    200
+}
+
+#[test]
+fn account_devices_connect_with_a_ticket_instead_of_the_password() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let verifier = beach_account::ticket::Verifier {
+            device: "dev1".into(),
+            key: beach_account::SigningKey::from_bytes(&TICKET_KEY).verifying_key(),
+        };
+        let security = rfb::handshake::ServerSecurity {
+            password: Some("unknown to the app"),
+            tickets: Some(&verifier),
+        };
+        let init = rfb::ServerInit {
+            width: 2,
+            height: 2,
+            pixel_format: PixelFormat::BGRX,
+            name: "Account fixture".into(),
+        };
+        let (_, _, grant) = rfb::handshake::server_handshake_secure(&mut stream, &security, &init).unwrap();
+        grant
+    });
+    let account = CString::new(r#"{"url":"https://coord.test","token":"session","device":"dev1"}"#).unwrap();
+    let mut error = [0; 1024];
+    let connection = unsafe {
+        beach_connection_start(
+            CString::new(address).unwrap().as_ptr(),
+            std::ptr::null(),
+            c"{}".as_ptr(),
+            account.as_ptr(),
+            Some(sign_ticket),
+            0,
+            std::ptr::null(),
+            24,
+            None,
+            std::ptr::null_mut(),
+            error.as_mut_ptr(),
+            error.len(),
+        )
+    };
+    assert!(!connection.is_null());
+    loop {
+        let event = poll(connection);
+        match event["kind"].as_str().unwrap() {
+            "connected" => break,
+            "progress" => {}
+            _ => panic!("unexpected event: {event}"),
+        }
+    }
+    let grant = server.join().unwrap().expect("signed in with a ticket");
+    assert_eq!(grant.user, "Alice");
+    let session = unsafe { beach_connection_take_session(connection) };
+    unsafe {
+        beach_connection_free(connection);
+        beach_session_free(session);
+    }
+}
+
+#[test]
+fn account_connections_need_the_http_callback() {
+    let mut error = [0; 1024];
+    let connection = unsafe {
+        beach_connection_start(
+            c"127.0.0.1:1".as_ptr(),
+            std::ptr::null(),
+            c"{}".as_ptr(),
+            cr#"{"url":"https://coord.test","token":"t","device":"d"}"#.as_ptr(),
+            None,
+            0,
+            std::ptr::null(),
+            24,
+            None,
+            std::ptr::null_mut(),
+            error.as_mut_ptr(),
+            error.len(),
+        )
+    };
+    assert!(connection.is_null());
 }

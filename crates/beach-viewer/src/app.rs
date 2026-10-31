@@ -568,6 +568,7 @@ impl App {
             server.name = server.host.clone();
         }
         let index = self.directory.upsert(editor.index, server.clone());
+        self.account.sync_soon();
         editor.form = server;
         editor.index = Some(index);
         editor.error = None;
@@ -585,6 +586,7 @@ impl App {
         };
         let name = server.name.clone();
         self.directory.remove(index);
+        self.account.sync_soon();
         self.confirm_delete = None;
         if let Some(editor) = &mut self.editor {
             match editor.index {
@@ -632,7 +634,15 @@ impl eframe::App for App {
         let ctx = &ui.ctx().clone();
         self.poll_update(ctx);
         self.poll_pending(ctx);
-        self.account.poll(ctx, &mut self.config);
+        let directory = &self.directory;
+        self.account.poll(ctx, &mut self.config, || directory.favorites());
+        // Not while a favorite is open or about to be deleted: indexes would move.
+        if self.editor.is_none() && self.confirm_delete.is_none() {
+            let favorites = self.account.take_favorites();
+            if self.directory.apply(&favorites) {
+                self.save_directory();
+            }
+        }
         self.show_sessions(ctx);
 
         #[cfg(target_os = "macos")]
@@ -964,6 +974,8 @@ impl App {
         let p = Palette::of(ui);
         let signed_in = self.config.account.signed_in();
         let devices = self.account.devices().to_vec();
+        let outdated = self.account.outdated();
+        let mut update: Option<Vec<beach_account::api::Device>> = None;
         ui.horizontal(|ui| {
             let heading = theme::section_header(ui, "Konto", Some(devices.len()));
             if signed_in {
@@ -977,6 +989,23 @@ impl App {
                 let label = if signed_in { "Konto verwalten" } else { "Anmelden …" };
                 if theme::Button::new(label, Kind::Ghost).small().show(ui).clicked() {
                     self.open_settings(ctx, Tab::Account);
+                }
+                if signed_in && self.account.requesting() {
+                    ui.spinner();
+                    ui.label(RichText::new("Updates werden angefordert …").color(p.weak));
+                } else if signed_in && !outdated.is_empty() {
+                    let label = format!("Alle aktualisieren ({})", outdated.len());
+                    if theme::Button::new(&label, Kind::Secondary)
+                        .small()
+                        .show(ui)
+                        .on_hover_text(
+                            "Aktualisiert die Geräte mit veralteter Version auf die neueste. Laufende \
+                             Verbindungen zu ihnen brechen dabei kurz ab.",
+                        )
+                        .clicked()
+                    {
+                        update = Some(outdated.clone());
+                    }
                 }
             });
         });
@@ -1057,13 +1086,14 @@ impl App {
             cards::grid(ui, list.len(), |ui, index, size| {
                 let device = list[index];
                 let line = account_ui::status(device);
+                let tags: Vec<&str> = account_ui::update_tag(device).into_iter().collect();
                 let response = cards::card(
                     ui,
                     size,
                     Card {
                         name: &device.name,
                         line: &line,
-                        tags: &[],
+                        tags: &tags,
                         online: Some(device.online),
                         editable: false,
                     },
@@ -1071,8 +1101,40 @@ impl App {
                 if response.connect {
                     connect = Some(device.clone());
                 }
+                let response = match &device.update {
+                    beach_account::api::UpdateState::Failed { error } => {
+                        response.response.on_hover_text(format!("Update fehlgeschlagen: {error}"))
+                    }
+                    _ => response.response,
+                };
+                let may_update = self.account.may_update(device) && !self.account.requesting();
+                response.context_menu(|ui| {
+                    ui.set_min_width(180.0);
+                    if ui.button("Verbinden").clicked() {
+                        connect = Some(device.clone());
+                        ui.close();
+                    }
+                    let label = if device.outdated { "Aktualisieren" } else { "Neueste Version installieren" };
+                    let item = ui.add_enabled(may_update, egui::Button::new(label));
+                    let item = if device.can_update {
+                        item
+                    } else {
+                        item.on_disabled_hover_text("Diese Version lässt sich nur am Gerät selbst aktualisieren.")
+                    };
+                    if item.clicked() {
+                        update = Some(vec![device.clone()]);
+                        ui.close();
+                    }
+                    if !device.version.is_empty() {
+                        ui.separator();
+                        ui.label(RichText::new(format!("Version {}", device.version)).color(p.weak));
+                    }
+                });
             });
             ui.add_space(8.0);
+        }
+        if let Some(devices) = update {
+            self.account.request_updates(ctx, &self.config, devices);
         }
         if let Some(device) = connect {
             self.connect_device(ctx, &device);

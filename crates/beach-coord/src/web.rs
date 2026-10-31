@@ -1,7 +1,8 @@
 //! The browser side: sign-in, the overview of one's devices and
 //! organizations, and managing members and invitation links. Plain HTML
-//! forms, no JavaScript beyond confirmation prompts (in `app.js`, so the
-//! content security policy can forbid inline scripts).
+//! forms, no JavaScript beyond confirmation prompts and reloading a page
+//! while a remote update runs (in `app.js`, so the content security policy
+//! can forbid inline scripts).
 
 use std::fmt::Write as _;
 
@@ -11,7 +12,7 @@ use axum::middleware::Next;
 use axum::response::{AppendHeaders, Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::Router;
-use beach_account::api::{Device, Org, Role, User};
+use beach_account::api::{Device, Org, Role, UpdateState, User};
 use serde::Deserialize;
 
 use crate::db::{self, Db, Identity, Login};
@@ -38,6 +39,8 @@ pub fn routes() -> Router<Shared> {
         .route("/orgs/{id}/members/{user}/remove", post(remove_member))
         .route("/orgs/{id}/delete", post(delete_org))
         .route("/devices/{id}/delete", post(delete_device))
+        .route("/devices/{id}/update", post(update_device))
+        .route("/devices/update-all", post(update_all))
         .route("/invite/{token}", get(invite_page).post(accept_invite))
         .route("/style.css", get(style))
         .route("/app.js", get(script))
@@ -438,21 +441,22 @@ async fn home(State(app): State<Shared>, headers: HeaderMap) -> Response {
         Ok(user) => user,
         Err(redirect) => return *redirect,
     };
-    match home_body(&db, &user) {
+    match home_body(&app, &db, &user) {
         Ok(body) => Html(page("Übersicht", Some(&user), &body)).into_response(),
         Err(e) => e.into_response(),
     }
 }
 
-fn home_body(db: &Db, user: &User) -> Result<String> {
-    let devices: Vec<Device> = db
+fn home_body(app: &App, db: &Db, user: &User) -> Result<String> {
+    let mut devices: Vec<Device> = db
         .visible_devices(&user.id)?
         .into_iter()
         .filter(|d| d.org.is_none())
         .collect();
+    app.mark_outdated(&mut devices);
     let orgs = db.orgs(&user.id)?;
     let mut body = String::new();
-    body.push_str(r#"<section class="card"><div class="head"><h2>Meine Geräte</h2></div>"#);
+    body.push_str(&devices_head("Meine Geräte", &devices, None, true));
     if devices.is_empty() {
         body.push_str(EMPTY_DEVICES);
     } else {
@@ -486,11 +490,66 @@ fn home_body(db: &Db, user: &User) -> Result<String> {
 
 const EMPTY_DEVICES: &str = r#"<p class="muted">Noch keine Geräte. Füge einen Computer in der VNC-Beach-App unter <em>Dieser Computer → Zum Konto hinzufügen</em> hinzu.</p>"#;
 
-/// Devices with status and addresses; `removable` decides the button.
-fn device_table(devices: &[Device], removable: impl Fn(&Device) -> bool) -> String {
+/// Devices "Alle aktualisieren" applies to.
+fn updatable(d: &Device) -> bool {
+    d.can_update && d.outdated && !d.update.pending()
+}
+
+/// Opens the devices card: heading, and "Alle aktualisieren" when the user
+/// may manage the devices and some are outdated. `org`: `None` for the
+/// personal devices.
+fn devices_head(title: &str, devices: &[Device], org: Option<&str>, manage: bool) -> String {
+    let mut html = format!(r#"<section class="card"><div class="head"><h2>{}</h2>"#, esc(title));
+    let count = devices.iter().filter(|d| updatable(d)).count();
+    if manage && count > 0 {
+        let _ = write!(
+            html,
+            r#"<form method="post" action="/devices/update-all" data-confirm="{count} {} auf die neueste Version aktualisieren? Laufende Verbindungen zu diesen Geräten brechen dabei kurz ab."><input type="hidden" name="org" value="{}"><button class="primary">Alle aktualisieren ({count})</button></form>"#,
+            if count == 1 { "Gerät" } else { "Geräte" },
+            esc(org.unwrap_or_default())
+        );
+    }
+    if devices.iter().any(|d| d.update.pending()) {
+        // Reloaded by app.js until the updates are done.
+        html.push_str(r#"<span data-refresh hidden></span>"#);
+    }
+    html.push_str("</div>");
+    html
+}
+
+/// The version cell: version, whether it's outdated, and a remote update's
+/// progress.
+fn version_cell(d: &Device) -> String {
+    let version = if d.version.is_empty() {
+        "–".to_string()
+    } else {
+        format!("<code>{}</code>", esc(&d.version))
+    };
+    let note = match &d.update {
+        UpdateState::Requested { .. } if d.online => r#"<div class="small">Update angefordert …</div>"#.to_string(),
+        UpdateState::Requested { .. } => {
+            r#"<div class="small muted">Update startet, sobald das Gerät online ist</div>"#.to_string()
+        }
+        UpdateState::Running { .. } => r#"<div class="small">Wird aktualisiert …</div>"#.to_string(),
+        UpdateState::Failed { error } => format!(
+            r#"<div class="small error">Update fehlgeschlagen: {}</div>"#,
+            esc(error)
+        ),
+        UpdateState::Idle if d.outdated && !d.can_update => {
+            r#"<div class="small muted">Nur am Gerät aktualisierbar</div>"#.to_string()
+        }
+        UpdateState::Idle => String::new(),
+    };
+    let badge = if d.outdated { r#"<span class="badge warn">veraltet</span>"# } else { "" };
+    format!("{version}{badge}{note}")
+}
+
+/// Devices with status, version and addresses; `manage` decides the
+/// buttons.
+fn device_table(devices: &[Device], manage: impl Fn(&Device) -> bool) -> String {
     let now = db::now();
     let mut html = String::from(
-        r#"<table><thead><tr><th>Gerät</th><th>Status</th><th>Adressen</th><th></th></tr></thead><tbody>"#,
+        r#"<table><thead><tr><th>Gerät</th><th>Status</th><th>Version</th><th>Adressen</th><th></th></tr></thead><tbody>"#,
     );
     for d in devices {
         let status = if d.online {
@@ -510,21 +569,32 @@ fn device_table(devices: &[Device], removable: impl Fn(&Device) -> bool) -> Stri
                 .collect::<Vec<_>>()
                 .join(" ")
         };
-        let remove = if removable(d) {
-            format!(
+        let mut actions = String::new();
+        if manage(d) {
+            let failed = matches!(d.update, UpdateState::Failed { .. });
+            if d.can_update && !d.update.pending() && (d.outdated || failed) {
+                let _ = write!(
+                    actions,
+                    r#"<form method="post" action="/devices/{}/update" data-confirm="{} auf die neueste Version aktualisieren? Eine laufende Verbindung bricht dabei kurz ab."><button class="link">{}</button></form>"#,
+                    esc(&d.id),
+                    esc(&d.name),
+                    if failed { "Erneut versuchen" } else { "Aktualisieren" }
+                );
+            }
+            let _ = write!(
+                actions,
                 r#"<form method="post" action="/devices/{}/delete" data-confirm="{} wirklich entfernen? Danach ist das Gerät über das Konto nicht mehr erreichbar."><button class="link danger">Entfernen</button></form>"#,
                 esc(&d.id),
                 esc(&d.name)
-            )
-        } else {
-            String::new()
-        };
+            );
+        }
         let _ = write!(
             html,
-            r#"<tr><td><strong>{}</strong><div class="muted small">{} · Port {}</div></td><td class="nowrap">{status}</td><td>{addresses}</td><td class="right">{remove}</td></tr>"#,
+            r#"<tr><td><strong>{}</strong><div class="muted small">{} · Port {}</div></td><td class="nowrap">{status}</td><td>{}</td><td>{addresses}</td><td class="right actions">{actions}</td></tr>"#,
             esc(&d.name),
             platform_label(&d.platform),
-            d.port
+            d.port,
+            version_cell(d)
         );
     }
     html.push_str("</tbody></table>");
@@ -594,8 +664,9 @@ fn org_body(app: &App, db: &Db, org: &Org, user: &User, new_link: Option<(&str, 
     );
 
     // Devices
-    let devices = db.org_devices(&org.id)?;
-    body.push_str(r#"<section class="card"><div class="head"><h2>Geräte</h2></div>"#);
+    let mut devices = db.org_devices(&org.id)?;
+    app.mark_outdated(&mut devices);
+    body.push_str(&devices_head("Geräte", &devices, Some(&org.id), manage));
     if devices.is_empty() {
         body.push_str(r#"<p class="muted">Noch keine Geräte. Wer Mitglied ist, fügt einen Computer in der VNC-Beach-App unter <em>Dieser Computer → Zum Konto hinzufügen</em> hinzu und wählt dort diese Organisation.</p>"#);
     } else {
@@ -913,6 +984,76 @@ async fn delete_device(State(app): State<Shared>, headers: HeaderMap, Path(id): 
     }
 }
 
+async fn update_device(State(app): State<Shared>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    let db = app.db();
+    let user = match require_user(&db, &headers, "/") {
+        Ok(user) => user,
+        Err(redirect) => return *redirect,
+    };
+    let result = (|| -> Result<String> {
+        match db.may_manage_device(&id, &user.id)? {
+            db::Access::Manage => {}
+            db::Access::View => {
+                return Err(forbidden(
+                    "Nur Admins und wer das Gerät hinzugefügt hat, können es aktualisieren.",
+                ))
+            }
+            db::Access::None => return Err(not_found()),
+        }
+        let owner = db.device_owner(&id)?.ok_or_else(not_found)?;
+        db.request_update(&id)?;
+        log::info!("{} requested an update of device {id}", user.login);
+        Ok(owner.org_id.map(|org| format!("/orgs/{org}")).unwrap_or_else(|| "/".into()))
+    })();
+    match result {
+        Ok(back) => Redirect::to(&back).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct UpdateAllForm {
+    /// Empty for the personal devices.
+    #[serde(default)]
+    org: String,
+}
+
+/// Updates the outdated devices of the personal list or an organization.
+async fn update_all(State(app): State<Shared>, headers: HeaderMap, Form(f): Form<UpdateAllForm>) -> Response {
+    let db = app.db();
+    let user = match require_user(&db, &headers, "/") {
+        Ok(user) => user,
+        Err(redirect) => return *redirect,
+    };
+    let result = (|| -> Result<String> {
+        let (mut devices, back) = if f.org.is_empty() {
+            let devices = db
+                .visible_devices(&user.id)?
+                .into_iter()
+                .filter(|d| d.org.is_none())
+                .collect::<Vec<_>>();
+            (devices, "/".to_string())
+        } else {
+            member_org(&db, &f.org, &user)?;
+            (db.org_devices(&f.org)?, format!("/orgs/{}", f.org))
+        };
+        app.mark_outdated(&mut devices);
+        let mut count = 0;
+        for d in devices.iter().filter(|d| updatable(d)) {
+            if db.may_manage_device(&d.id, &user.id)? == db::Access::Manage {
+                db.request_update(&d.id)?;
+                count += 1;
+            }
+        }
+        log::info!("{} requested updates of {count} devices", user.login);
+        Ok(back)
+    })();
+    match result {
+        Ok(back) => Redirect::to(&back).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
 // Invitations
 
 async fn invite_page(State(app): State<Shared>, headers: HeaderMap, Path(token): Path<String>) -> Response {
@@ -1005,9 +1146,13 @@ async fn script() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], SCRIPT)
 }
 
-/// Confirmation prompts for forms with `data-confirm`, and click-to-select
-/// for inputs with `data-select`.
+/// Confirmation prompts for forms with `data-confirm`, click-to-select for
+/// inputs with `data-select`, and a reload every 10 seconds while the page
+/// has a `data-refresh` element (remote updates in progress).
 const SCRIPT: &str = r#"
+if (document.querySelector('[data-refresh]')) {
+  setTimeout(function () { window.location.reload(); }, 10000);
+}
 document.addEventListener('submit', function (e) {
   var q = e.target.getAttribute('data-confirm');
   if (q && !window.confirm(q)) { e.preventDefault(); }
@@ -1077,6 +1222,9 @@ code { font:13px var(--mono); background:#F3EEE4; padding:1px 5px; border-radius
 .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:#B8B0A2; margin-right:6px; }
 .dot.on { background:#2E9D5B; }
 .badge { font-size:12px; font-weight:700; background:#E4F4FB; color:var(--deep); padding:2px 8px; border-radius:20px; margin-left:8px; }
+.badge.warn { background:#FFF3D1; color:#8A5A00; }
+.error { color:var(--red); }
+td.actions form { display:inline-block; margin-left:12px; }
 .list { list-style:none; padding:0; margin:0 0 14px; }
 .list li { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--line); gap:10px; }
 .list li form { margin:0; }
@@ -1085,7 +1233,7 @@ code { font:13px var(--mono); background:#F3EEE4; padding:1px 5px; border-radius
 .copy { width:100%; font:13px var(--mono); }
 .danger-zone summary { cursor:pointer; font-weight:700; color:var(--red); }
 footer { text-align:center; font-size:13px; color:#5B7385; padding:0 20px 32px; }
-@media (max-width:640px) { th:nth-child(3), td:nth-child(3) { display:none; } }
+@media (max-width:640px) { th:nth-child(4), td:nth-child(4) { display:none; } }
 "#;
 
 pub fn esc(text: &str) -> String {
@@ -1265,6 +1413,53 @@ mod tests {
             .clone();
         let user = app.db().take_app_code(&code, "v").unwrap();
         assert!(user.is_some());
+    }
+
+    #[tokio::test]
+    async fn outdated_devices_get_update_buttons() {
+        let app = crate::test_app();
+        let (alice, _) = dev_sign_in(&app, "Alice", "").await;
+        let (_, headers, _) = send(&app, post("/orgs", Some(&alice), "name=Team")).await;
+        let org_path = headers[header::LOCATION].to_str().unwrap().to_string();
+        let org = org_path.trim_start_matches("/orgs/").to_string();
+        let device = {
+            let db = app.db();
+            let user = db
+                .sign_in(&Identity {
+                    provider: "dev".into(),
+                    subject: "alice".into(),
+                    name: "Alice".into(),
+                    login: "alice".into(),
+                })
+                .unwrap();
+            let (id, _) = db.register_device("Empfang", "windows", Some(&org), &user.id).unwrap();
+            let beat = beach_account::api::Heartbeat {
+                addresses: Vec::new(),
+                port: 5901,
+                version: "0.4.0".into(),
+                remote_update: true,
+                update_result: None,
+            };
+            db.heartbeat(&id, &beat).unwrap();
+            id
+        };
+        let (_, _, html) = send(&app, get(&org_path, Some(&alice))).await;
+        assert!(html.contains("Alle aktualisieren (1)"));
+        assert!(html.contains(&format!("/devices/{device}/update")));
+
+        // Bob isn't a member: neither the list nor a single device.
+        let (bob, _) = dev_sign_in(&app, "Bob", "").await;
+        let (status, _, _) = send(&app, post("/devices/update-all", Some(&bob), &format!("org={org}"))).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, _, _) = send(&app, post(&format!("/devices/{device}/update"), Some(&bob), "")).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let (status, _, _) = send(&app, post("/devices/update-all", Some(&alice), &format!("org={org}"))).await;
+        assert!(status.is_redirection());
+        let (_, _, html) = send(&app, get(&org_path, Some(&alice))).await;
+        assert!(html.contains("Update angefordert"));
+        assert!(html.contains("data-refresh"));
+        assert!(!html.contains("Alle aktualisieren"));
     }
 
     #[tokio::test]

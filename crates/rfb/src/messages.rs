@@ -31,6 +31,7 @@ pub enum ClientMessage {
     ClientCutText(String),
     FileTransfer(crate::files::Request),
     Camera(crate::camera::ClientMessage),
+    Enroll(crate::enroll::ClientMessage),
     /// Request for a new framebuffer size and layout (sent by viewers that
     /// saw an [`EXTENDED_DESKTOP_SIZE`](crate::encoding::EXTENDED_DESKTOP_SIZE)
     /// rectangle). Servers that can't resize answer with status
@@ -78,6 +79,7 @@ impl ClientMessage {
             }
             crate::files::MESSAGE_TYPE => ClientMessage::FileTransfer(crate::files::Request::read(r)?),
             crate::camera::MESSAGE_TYPE => ClientMessage::Camera(crate::camera::ClientMessage::read(r)?),
+            crate::enroll::MESSAGE_TYPE => ClientMessage::Enroll(crate::enroll::ClientMessage::read(r)?),
             251 => {
                 r.skip(1)?;
                 let width = r.u16()?;
@@ -132,6 +134,7 @@ impl ClientMessage {
             }
             ClientMessage::FileTransfer(request) => return request.write(w),
             ClientMessage::Camera(msg) => return msg.write(w),
+            ClientMessage::Enroll(msg) => return msg.write(w),
             ClientMessage::ClientCutText(text) => {
                 b.extend_from_slice(&[6, 0, 0, 0]);
                 write_cut_text(&mut b, text)?;
@@ -288,6 +291,7 @@ pub enum ServerMessage {
     ServerCutText(String),
     FileTransfer(crate::files::Response),
     Camera(crate::camera::ServerMessage),
+    Enroll(crate::enroll::ServerMessage),
 }
 
 impl ServerMessage {
@@ -311,6 +315,7 @@ impl ServerMessage {
             }
             crate::files::MESSAGE_TYPE => ServerMessage::FileTransfer(crate::files::Response::read(r)?),
             crate::camera::MESSAGE_TYPE => ServerMessage::Camera(crate::camera::ServerMessage::read(r)?),
+            crate::enroll::MESSAGE_TYPE => ServerMessage::Enroll(crate::enroll::ServerMessage::read(r)?),
             t => return proto(format!("unknown server message type {t}")),
         })
     }

@@ -51,12 +51,17 @@ final class RemoteSession {
     private(set) var preparationStatus = "Verbindung wird geprüft …"
     private(set) var preparationAction = ConnectionAction.connect
     private(set) var prompt: AccessPrompt?
+    /// The server can join a VNC Beach account (`rfb::enroll`); nil if not.
+    private(set) var enrollHello: EnrollHello?
+    private var enrollWaiter: CheckedContinuation<String?, Never>?
 
     func connect(address: String, password: String, depth: ColorDepth,
-                 access: AccessSettings = AccessSettings(), action: ConnectionAction = .connect) async {
+                 access: AccessSettings = AccessSettings(), account: String? = nil,
+                 action: ConnectionAction = .connect) async {
         close()
         state = .connecting
         closedByUser = false
+        enrollHello = nil
         preparationAction = action
         preparationStatus = "Verbindung wird geprüft …"
         let prepared: PreparedAccess
@@ -70,7 +75,7 @@ final class RemoteSession {
             .appendingPathComponent("VNC Beach/ssh_hosts").path
         var error = [CChar](repeating: 0, count: 2048)
         guard let job = beach_connection_start(address, password.isEmpty ? nil : password,
-            prepared.json, action.rawValue, hosts, UInt8(depth.rawValue), sessionEventCallback,
+            prepared.json, account, account == nil ? nil : accountHTTPPost, action.rawValue, hosts, UInt8(depth.rawValue), sessionEventCallback,
             context, &error, error.count) else {
             Unmanaged<CallbackBox>.fromOpaque(context).release()
             callbackBox = nil
@@ -142,6 +147,7 @@ final class RemoteSession {
     /// Closes both preparation and established sessions; safe to repeat.
     func close(byUser: Bool = false) {
         if byUser { closedByUser = true }
+        finishEnroll("Die Verbindung wurde getrennt.")
         callbackBox = nil
         prompt = nil
         if let current = attempt {
@@ -201,6 +207,26 @@ final class RemoteSession {
         beach_session_refresh(handle.pointer)
     }
 
+    /// Hands the server a registration (`Enrollment` JSON) and waits for
+    /// its answer. Returns the server's error, nil on success.
+    func enroll(_ json: String) async -> String? {
+        guard let handle, enrollHello != nil else { return "Dieser Computer kann nicht hinzugefügt werden." }
+        finishEnroll("Abgebrochen.")
+        return await withCheckedContinuation { continuation in
+            enrollWaiter = continuation
+            beach_session_enroll(handle.pointer, json)
+            Task {
+                try? await Task.sleep(for: .seconds(20))
+                self.finishEnroll("Der Computer hat nicht geantwortet.")
+            }
+        }
+    }
+
+    private func finishEnroll(_ error: String?) {
+        enrollWaiter?.resume(returning: error)
+        enrollWaiter = nil
+    }
+
     /// The part of the framebuffer on show: one display or all of it.
     var crop: CGRect {
         if let i = selectedScreen, i < screens.count {
@@ -255,6 +281,16 @@ final class RemoteSession {
             let reason = text ?? ""
             close()
             state = .closed(Self.describe(reason))
+        case BEACH_EVENT_ENROLL_HELLO:
+            enrollHello = text.flatMap { try? JSONDecoder().decode(EnrollHello.self, from: Data($0.utf8)) }
+        case BEACH_EVENT_ENROLL_RESULT:
+            guard let result = text.flatMap({ try? JSONDecoder().decode(EnrollResult.self, from: Data($0.utf8)) })
+            else {
+                finishEnroll("Unerwartete Antwort des Computers.")
+                return
+            }
+            if result.error == nil { enrollHello?.joined = true }
+            finishEnroll(result.error)
         default:
             break
         }

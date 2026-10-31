@@ -9,6 +9,12 @@ struct Server: Identifiable, Codable, Hashable {
     var viewOnly = false
     /// Optional so favourites saved by older app versions still decode.
     var access: AccessSettings?
+    /// Device ID of an account device (see `AccountStore`); its sessions
+    /// sign in with a ticket from the coordination server.
+    var device: String?
+    /// Unix milliseconds of the last change, for the favourites sync; nil
+    /// if never synced.
+    var updated: Int64?
 
     var displayName: String {
         name.trimmingCharacters(in: .whitespaces).isEmpty ? host : name

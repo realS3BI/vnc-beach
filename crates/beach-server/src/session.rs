@@ -23,7 +23,9 @@ pub struct Context {
     pub input: Option<Input>,
     pub password: Option<String>,
     /// Accepts VNC Beach account tickets next to the password.
-    pub tickets: Option<beach_account::ticket::Verifier>,
+    pub tickets: std::sync::RwLock<Option<beach_account::ticket::Verifier>>,
+    /// Adds this computer to an account on a viewer's request.
+    pub enroller: std::sync::RwLock<Option<Arc<dyn Enroller>>>,
     /// Turns peers away that failed to authenticate too often.
     pub throttle: crate::throttle::Throttle,
     pub file_transfer: bool,
@@ -35,6 +37,14 @@ pub struct Context {
     pub name: String,
     /// Set when the server shuts down; sessions end at their next tick.
     pub stop: Arc<AtomicBool>,
+}
+
+/// Adds this computer to a VNC Beach account (`rfb::enroll`), for the
+/// process that owns the configuration.
+pub trait Enroller: Send + Sync {
+    fn hello(&self) -> beach_account::api::EnrollHello;
+    /// Stores the registration; the error is in words for the user.
+    fn enroll(&self, enrollment: beach_account::api::Enrollment) -> Result<(), String>;
 }
 
 const TILE: usize = 64;
@@ -68,12 +78,10 @@ pub fn run(stream: TcpStream, ctx: &Context) -> anyhow::Result<()> {
         name: ctx.name.clone(),
     };
     let mut handshake_stream = stream.try_clone()?;
+    let tickets = ctx.tickets.read().unwrap().clone();
     let security = ServerSecurity {
         password: ctx.password.as_deref(),
-        tickets: ctx
-            .tickets
-            .as_ref()
-            .map(|v| v as &dyn rfb::handshake::TicketVerifier),
+        tickets: tickets.as_ref().map(|v| v as &dyn rfb::handshake::TicketVerifier),
     };
     let (_, _, grant) = match server_handshake_secure(&mut handshake_stream, &security, &init) {
         Ok(done) => done,
@@ -118,6 +126,7 @@ pub fn run(stream: TcpStream, ctx: &Context) -> anyhow::Result<()> {
         clipboard_seq: ctx.clipboard.seq(),
         files: None,
         camera: None,
+        enroll: false,
         view_only: grant.is_some_and(|g| g.view_only),
     };
     let result = session.serve(ctx, rx);
@@ -149,6 +158,8 @@ struct Session {
     clipboard_seq: u64,
     files: Option<crate::files::Session>,
     camera: Option<crate::camera::Link>,
+    /// The viewer may add this computer to an account (Hello was sent).
+    enroll: bool,
     /// The account ticket only allows watching.
     view_only: bool,
 }
@@ -272,6 +283,17 @@ impl Session {
                 } else {
                     self.files = None;
                 }
+                let enroller = ctx.enroller.read().unwrap().clone();
+                match enroller.filter(|_| !self.view_only && encs.contains(&encoding::BEACH_ENROLL)) {
+                    Some(enroller) if !self.enroll => {
+                        let hello = serde_json::to_string(&enroller.hello())?;
+                        rfb::enroll::ServerMessage::Hello(hello).write(&mut self.out)?;
+                        self.out.flush()?;
+                        self.enroll = true;
+                    }
+                    Some(_) => {}
+                    None => self.enroll = false,
+                }
                 let camera = !self.view_only && encs.contains(&encoding::BEACH_CAMERA);
                 if !camera {
                     self.camera = None;
@@ -344,6 +366,25 @@ impl Session {
                     rfb::camera::ClientMessage::Sharing(on) => camera.sharing(on),
                     rfb::camera::ClientMessage::Video(video) => camera.video(video),
                 }
+            }
+            ClientMessage::Enroll(rfb::enroll::ClientMessage::Enroll(json)) => {
+                let enroller = ctx.enroller.read().unwrap().clone();
+                let Some(enroller) = enroller.filter(|_| self.enroll) else {
+                    anyhow::bail!("enrollment was not negotiated");
+                };
+                let result = match serde_json::from_str::<beach_account::api::Enrollment>(&json) {
+                    Ok(enrollment) => {
+                        log::info!("viewer adds this computer to {} as {}", enrollment.url, enrollment.name);
+                        enroller.enroll(enrollment)
+                    }
+                    Err(_) => Err("Die Kontodaten sind ungültig.".to_string()),
+                };
+                if let Err(e) = &result {
+                    log::warn!("enrollment refused: {e}");
+                }
+                let answer = beach_account::api::EnrollResult { error: result.err() };
+                rfb::enroll::ServerMessage::Result(serde_json::to_string(&answer)?).write(&mut self.out)?;
+                self.out.flush()?;
             }
             ClientMessage::ClientCutText(text) => {
                 log::debug!("viewer clipboard: {} chars", text.chars().count());

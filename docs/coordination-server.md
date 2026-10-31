@@ -43,13 +43,26 @@ Wichtig: Wer den Koordinationsserver und seinen Schlüssel (`ticket-key`) kontro
 
 **Verbinden:** Ein Gerät in der Liste anklicken zeigt Status und Adressen, Doppelklick oder *Verbinden* verbindet. Es gelten die Standardeinstellungen des Viewers.
 
+**Favoriten abgleichen:** Angemeldet gleichen Viewer und App ihre Favoriten über den Koordinationsserver ab: Name, Adresse, Ausweichadressen und „Nur ansehen“. Ändern, Hinzufügen und Löschen auf einem Gerät erscheint auf den anderen, bei gleichzeitigen Änderungen gewinnt die jüngere. Passwörter, SSH-Zugang und Aufwecken bleiben auf jedem Gerät: Das VNC-Passwort trägst du auf jedem Gerät einmal im Favoriten ein (bei Geräten im Konto ist keines nötig). Beim ersten Abgleich werden gleiche Adressen zusammengeführt statt verdoppelt.
+
+**iPad und iPhone:** In der App unter *Einstellungen → Konto* die Adresse des Koordinationsservers eingeben und *Anmelden* tippen. Die Anmeldeseite öffnet sich in der App. Die Übersicht zeigt wie am Computer Kacheln: oben die Favoriten, darunter die Geräte des Kontos nach Persönlich und Organisationen, mit Status, Version und „Update verfügbar“. Antippen verbindet ohne VNC-Passwort, langes Drücken bietet *Aktualisieren*, *Alle aktualisieren* steht neben der Überschrift. Herunterziehen lädt neu. Die letzte Liste bleibt auf dem Gerät gespeichert und erscheint auch, wenn der Koordinationsserver gerade nicht erreichbar ist.
+
+**Computer vom iPad aus hinzufügen:** Mit dem Computer verbinden (Favorit mit VNC-Passwort), dann im Menü der Sitzung (…) *Zum Konto hinzufügen …* wählen, Name und Besitz (persönlich oder Organisation) festlegen. Die App registriert den Computer im Konto und übergibt ihm die Zugangsdaten über die laufende VNC-Verbindung (ausgehandelte Erweiterung, Message-Typ 242, siehe [`crates/rfb/src/enroll.rs`](../crates/rfb/src/enroll.rs)); bestehende Verbindungen bleiben dabei bestehen. Das geht mit VNC Beach ab dieser Version auf Mac und Windows, nicht mit fremden VNC-Servern. Ist der Computer schon in einem Konto, zeigt das Menü das an; entfernen geht weiter am Computer selbst.
+
 **Organisationen verwalten:** *Verwalten* öffnet die Weboberfläche des Koordinationsservers. Dort legst du Organisationen an, erzeugst Einladungslinks (einmalig nutzbar, 7 Tage gültig), änderst Rollen und entfernst Mitglieder oder Geräte.
 
 | Rolle | darf |
 | --- | --- |
 | Mitglied | alle Geräte der Organisation sehen und sich verbinden, eigene Computer hinzufügen |
-| Admin | zusätzlich einladen, Mitglieder und Admins verwalten, Geräte entfernen |
+| Admin | zusätzlich einladen, Mitglieder und Admins verwalten, Geräte entfernen und aktualisieren |
 | Owner | zusätzlich Owner ernennen und die Organisation löschen. Die letzte Owner-Rolle bleibt immer besetzt. |
+
+**Geräte aus der Ferne aktualisieren:** Der Koordinationsserver fragt alle drei Stunden bei GitHub nach der neuesten Version und markiert ältere Geräte als *veraltet*. In der Weboberfläche aktualisiert *Aktualisieren* ein einzelnes Gerät und *Alle aktualisieren* alle veralteten Geräte einer Liste. Im Viewer findest du *Alle aktualisieren* neben *Konto verwalten*; einzelne Geräte aktualisierst du über das Kontextmenü (Rechtsklick auf die Karte). Das Gerät erfährt es beim nächsten Heartbeat (spätestens nach einer Minute; ein Gerät, das gerade offline ist, sobald es wieder online ist), lädt die neueste Version selbst von GitHub, prüft sie wie beim normalen Update (Prüfsumme, unter macOS die Entwickler-ID) und startet neu. Laufende Verbindungen brechen dabei kurz ab. Der Koordinationsserver schickt nur das Signal, nie eine Download-Adresse.
+
+- Erlaubt ist das für eigene Geräte, in Organisationen für Admins und für das Mitglied, das das Gerät hinzugefügt hat.
+- Ab Version 0.4.1. Ältere Geräte zeigen *nur am Gerät aktualisierbar*, ebenso Entwicklungs-Builds und unter macOS eine App, die nicht im Programme-Ordner liegt.
+- Windows mit Dienst: Der Dienst aktualisiert seine Kopie in `C:\Program Files\VNC Beach` und startet neu, danach zieht der Hintergrundprozess des angemeldeten Benutzers seine eigene Kopie nach. Eine Administratorabfrage erscheint dabei nicht.
+- macOS: Am Anmeldefenster (vor der Anmeldung) wird nicht aktualisiert, erst wenn jemand angemeldet ist.
 
 ## Selbst betreiben
 
@@ -83,6 +96,7 @@ Oder direkt: `cargo build --release -p beach-coord`, dann `target/release/beach-
 | `BEACH_NAME` / `--name` | angezeigter Name, Standard „VNC Beach“ |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | Anmeldung mit GitHub |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Anmeldung mit Google |
+| `BEACH_RELEASE_URL` / `--release-url` | GitHub-API-Adresse der neuesten Version, gegen die Geräte als veraltet gelten. Leer schaltet die Prüfung ab; *Aktualisieren* gibt es dann nur für Geräte mit fehlgeschlagenem Update. |
 | `BEACH_DEV_LOGIN=1` / `--dev-login` | Anmeldung nur mit einem Namen, **nur zum Entwickeln**: Jeder kann sich als jeder ausgeben. |
 
 ### 3. HTTPS davor
@@ -105,7 +119,8 @@ Die JSON-API ist in [`crates/beach-account/src/api.rs`](../crates/beach-account/
 
 ## Grenzen
 
-- Die iPad- und iPhone-App kennt das Konto noch nicht und verbindet sich weiter per Passwort.
+- Die iPad- und iPhone-App teilt keinen eigenen Bildschirm und kann sich deshalb nicht selbst als Gerät hinzufügen, nur Computer, mit denen sie verbunden ist.
+- Der Favoriten-Abgleich braucht einen Koordinationsserver ab dieser Version (`/api/favorites`); ältere ignorieren ihn ohne Fehler.
 - Die Verbindung braucht beim Aufbau den Koordinationsserver (für das Ticket). Ist er nicht erreichbar, bleibt der Weg über einen Favoriten mit VNC-Passwort.
 - Einstellungen pro Gerät (Farbtiefe, Nur ansehen …) gibt es für Kontogeräte noch nicht. Es gelten die Standardeinstellungen.
 - Rechte feiner als die Rollen, z. B. Gruppen oder „nur ansehen“ für bestimmte Mitglieder, sind vorbereitet (das Ticket kann „nur ansehen“ tragen, der Server setzt es durch), aber noch nicht einstellbar.

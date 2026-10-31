@@ -19,6 +19,8 @@ pub const EVENT_FRAME: i32 = 0;
 pub const EVENT_CLIPBOARD: i32 = 1;
 pub const EVENT_CLOSED: i32 = 2;
 pub const EVENT_RESIZED: i32 = 3;
+pub const EVENT_ENROLL_HELLO: i32 = 4;
+pub const EVENT_ENROLL_RESULT: i32 = 5;
 
 pub const REMOTE_OTHER: i32 = 0;
 pub const REMOTE_BEACH_MAC: i32 = 1;
@@ -60,6 +62,8 @@ fn emit(sink: &Sink, event: Event) {
         Event::Resized => (EVENT_RESIZED, None),
         Event::Clipboard(t) => (EVENT_CLIPBOARD, Some(t)),
         Event::Closed(t) => (EVENT_CLOSED, Some(t)),
+        Event::EnrollHello(t) => (EVENT_ENROLL_HELLO, Some(t)),
+        Event::EnrollResult(t) => (EVENT_ENROLL_RESULT, Some(t)),
     };
     let text = text.map(|t| CString::new(t.replace('\0', "")).unwrap());
     let ptr = text.as_ref().map_or(std::ptr::null(), |t| t.as_ptr());
@@ -339,6 +343,19 @@ pub unsafe extern "C" fn beach_session_cut_text(session: *mut BeachSession, text
     }
 }
 
+/// Hands the server a registration for an account (`Enrollment` JSON, see
+/// `beach_account::api`), after `BEACH_EVENT_ENROLL_HELLO`. The answer comes
+/// as `BEACH_EVENT_ENROLL_RESULT`.
+///
+/// # Safety
+/// `json` must be a valid C string.
+#[no_mangle]
+pub unsafe extern "C" fn beach_session_enroll(session: *mut BeachSession, json: *const c_char) {
+    if let (Some(s), Some(json)) = (unsafe { with(session) }, unsafe { c_str(json) }) {
+        s.conn.enroll(json);
+    }
+}
+
 /// Requests the whole screen again (after the app was suspended).
 ///
 /// # Safety
@@ -364,6 +381,54 @@ pub extern "C" fn beach_keysym_for_char(scalar: u32) -> u32 {
 pub unsafe extern "C" fn beach_normalize_address(input: *const c_char, buf: *mut c_char, len: usize) {
     let input = unsafe { c_str(input) }.unwrap_or("");
     unsafe { fill(buf, len, &parse_address(input)) };
+}
+
+/// Loopback listener for the browser sign-in, see
+/// [`beach_account::loopback`].
+pub struct BeachLogin(beach_account::loopback::Loopback);
+
+/// Listens on 127.0.0.1 and writes the port into `port`. NULL on failure.
+///
+/// # Safety
+/// `port` must be valid or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn beach_login_start(port: *mut u16) -> *mut BeachLogin {
+    match beach_account::loopback::Loopback::bind() {
+        Ok(loopback) => {
+            if !port.is_null() {
+                unsafe { *port = loopback.port() };
+            }
+            Box::into_raw(Box::new(BeachLogin(loopback)))
+        }
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Answers the browser for up to `timeout_ms` (blocking) and returns the
+/// callback code (release with `beach_string_free`), or NULL if none came.
+///
+/// # Safety
+/// `login` must come from `beach_login_start`.
+#[no_mangle]
+pub unsafe extern "C" fn beach_login_wait(login: *mut BeachLogin, timeout_ms: u32) -> *mut c_char {
+    let Some(login) = (unsafe { login.as_ref() }) else {
+        return std::ptr::null_mut();
+    };
+    match login.0.accept_code(std::time::Duration::from_millis(timeout_ms.into())) {
+        Ok(Some(code)) => CString::new(code).map_or(std::ptr::null_mut(), CString::into_raw),
+        _ => std::ptr::null_mut(),
+    }
+}
+
+/// Stops listening.
+///
+/// # Safety
+/// `login` must come from `beach_login_start` and not be used afterwards.
+#[no_mangle]
+pub unsafe extern "C" fn beach_login_free(login: *mut BeachLogin) {
+    if !login.is_null() {
+        drop(unsafe { Box::from_raw(login) });
+    }
 }
 
 #[cfg(test)]

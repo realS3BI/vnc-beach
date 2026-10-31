@@ -5,6 +5,7 @@ import UIKit
 struct SessionScreen: View {
     let server: Server
     @Environment(ServerStore.self) private var store
+    @Environment(AccountStore.self) private var account
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var session = RemoteSession()
@@ -14,6 +15,7 @@ struct SessionScreen: View {
     /// connect, so text copied before connecting goes over too.
     @State private var pasteboardChangeCount: Int?
     @State private var wasConnected = false
+    @State private var enrolling = false
 
     private var swapCommandControl: Bool {
         switch AppSettings.shortcutMapping {
@@ -69,6 +71,9 @@ struct SessionScreen: View {
                 .id(prompt.id)
         }
         .persistentSystemOverlays(.hidden)
+        .sheet(isPresented: $enrolling) {
+            EnrollView(session: session)
+        }
         .task(id: server.id) {
             controller.viewOnly = server.viewOnly
             await connect()
@@ -150,6 +155,16 @@ struct SessionScreen: View {
                         Divider()
                         Button("Zwischenablage senden") { sendPasteboard(force: true) }
                         Button("Bild neu laden") { session.refresh() }
+                        if let hello = session.enrollHello {
+                            Divider()
+                            if let device = hello.device {
+                                Text("Im Konto als „\(device.name)“")
+                            } else if !hello.joined {
+                                Button("Zum Konto hinzufügen …", systemImage: "person.crop.circle.badge.plus") {
+                                    enrolling = true
+                                }
+                            }
+                        }
                         Divider()
                         Toggle("Bild über der Tastatur verkleinern", isOn: $controller.keyboardShrinks)
                         Toggle("Nur ansehen", isOn: $controller.viewOnly)
@@ -246,7 +261,8 @@ struct SessionScreen: View {
         }
         await session.connect(
             address: server.host, password: store.password(for: server), depth: AppSettings.colorDepth,
-            access: server.access ?? AccessSettings(), action: action)
+            access: server.access ?? AccessSettings(), account: account.ticketTarget(for: server),
+            action: action)
         if session.state == .connected {
             wasConnected = true
             sendPasteboard(force: false)

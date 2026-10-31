@@ -3,10 +3,10 @@
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use beach_account::api::{
-    ApiError, Device, Heartbeat, Info, Me, RegisterDevice, Registration, TicketRequest, TicketResponse,
+    ApiError, Device, Favorite, Heartbeat, HeartbeatResponse, Info, Me, RegisterDevice, Registration, TicketRequest, TicketResponse,
     TokenRequest, TokenResponse, User,
 };
 use beach_account::ticket::{self, Claims};
@@ -23,6 +23,9 @@ pub fn routes() -> Router<Shared> {
         .route("/api/me", get(me))
         .route("/api/devices", get(devices).post(register))
         .route("/api/devices/{id}/ticket", post(issue_ticket))
+        .route("/api/devices/{id}/update", post(request_update))
+        .route("/api/favorites", get(favorites))
+        .route("/api/favorites/{id}", put(put_favorite))
         .route("/api/device/heartbeat", post(heartbeat))
         .route("/api/device", delete(unregister))
 }
@@ -110,7 +113,61 @@ async fn me(State(app): State<Shared>, headers: HeaderMap) -> Result<Json<Me>> {
 async fn devices(State(app): State<Shared>, headers: HeaderMap) -> Result<Json<Vec<Device>>> {
     let db = app.db();
     let user = session(&db, &headers)?;
-    Ok(Json(db.visible_devices(&user.id)?))
+    let mut devices = db.visible_devices(&user.id)?;
+    app.mark_outdated(&mut devices);
+    Ok(Json(devices))
+}
+
+async fn favorites(State(app): State<Shared>, headers: HeaderMap) -> Result<Json<Vec<Favorite>>> {
+    let db = app.db();
+    let user = session(&db, &headers)?;
+    Ok(Json(db.favorites(&user.id)?))
+}
+
+async fn put_favorite(
+    State(app): State<Shared>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(mut f): Json<Favorite>,
+) -> Result<StatusCode> {
+    let db = app.db();
+    let user = session(&db, &headers)?;
+    if f.id != id {
+        return Err(Error::bad("favorite id does not match the path"));
+    }
+    beach_account::favorites::validate(&f).map_err(Error::bad)?;
+    if f.deleted {
+        // A tombstone needs nothing but its id and time.
+        f = Favorite {
+            name: String::new(),
+            host: String::new(),
+            alternatives: Vec::new(),
+            view_only: false,
+            ..f
+        };
+    }
+    if !db.put_favorite(&user.id, &f)? {
+        return Err(Error(StatusCode::INSUFFICIENT_STORAGE, "too many favorites".into()));
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn request_update(State(app): State<Shared>, headers: HeaderMap, Path(id): Path<String>) -> Result<StatusCode> {
+    let db = app.db();
+    let user = session(&db, &headers)?;
+    match db.may_manage_device(&id, &user.id)? {
+        db::Access::Manage => {}
+        db::Access::View => {
+            return Err(Error(
+                StatusCode::FORBIDDEN,
+                "Nur Admins und wer das Gerät hinzugefügt hat, können es aktualisieren.".into(),
+            ))
+        }
+        db::Access::None => return Err(Error(StatusCode::NOT_FOUND, "no such device".into())),
+    }
+    db.request_update(&id)?;
+    log::info!("{} requested an update of device {id}", user.login);
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn register(
@@ -168,7 +225,7 @@ async fn heartbeat(
     State(app): State<Shared>,
     headers: HeaderMap,
     Json(mut hb): Json<Heartbeat>,
-) -> Result<StatusCode> {
+) -> Result<Response> {
     let db = app.db();
     let id = device_id(&db, &headers)?;
     hb.addresses.retain(|a| !a.is_empty() && a.len() <= 255);
@@ -176,8 +233,11 @@ async fn heartbeat(
     if let Some((cut, _)) = hb.version.char_indices().nth(32) {
         hb.version.truncate(cut);
     }
-    db.heartbeat(&id, &hb)?;
-    Ok(StatusCode::NO_CONTENT)
+    if db.heartbeat(&id, &hb)? {
+        log::info!("telling device {id} ({}) to update", hb.version);
+        return Ok(Json(HeartbeatResponse { update: true }).into_response());
+    }
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 async fn unregister(State(app): State<Shared>, headers: HeaderMap) -> Result<StatusCode> {
@@ -351,6 +411,85 @@ mod tests {
             Some(serde_json::json!({"addresses": [], "port": 5901, "version": ""})),
         )
         .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    async fn session_token(app: &Shared, name: &str) -> String {
+        let (_, code) = sign_in(app, name);
+        let (_, session) = call::<TokenResponse>(
+            app,
+            "POST",
+            "/api/token",
+            None,
+            Some(serde_json::json!({"code": code, "verifier": format!("verifier-{name}")})),
+        )
+        .await;
+        session.unwrap().token
+    }
+
+    #[tokio::test]
+    async fn remote_update_reaches_the_device_through_the_heartbeat() {
+        let app = crate::test_app();
+        let alice = session_token(&app, "alice").await;
+        let bob = session_token(&app, "bob").await;
+        let (_, reg) = call::<Registration>(
+            &app,
+            "POST",
+            "/api/devices",
+            Some(&alice),
+            Some(serde_json::json!({"name": "PC", "platform": "windows", "org": null})),
+        )
+        .await;
+        let reg = reg.unwrap();
+        let beat = serde_json::json!({"addresses": [], "port": 5901, "version": "0.4.0", "remote_update": true});
+        let (status, _) = call::<()>(&app, "POST", "/api/device/heartbeat", Some(&reg.token), Some(beat.clone())).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+
+        let (_, devices) = call::<Vec<Device>>(&app, "GET", "/api/devices", Some(&alice), None).await;
+        let device = &devices.unwrap()[0];
+        assert!(device.outdated, "0.4.0 is older than the test app's 0.4.1");
+        assert!(device.can_update);
+
+        let path = format!("/api/devices/{}/update", reg.id);
+        let (status, _) = call::<()>(&app, "POST", &path, Some(&bob), None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "not Bob's device");
+        let (status, _) = call::<()>(&app, "POST", &path, Some(&alice), None).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+
+        let (status, answer) =
+            call::<HeartbeatResponse>(&app, "POST", "/api/device/heartbeat", Some(&reg.token), Some(beat.clone())).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(answer.unwrap().update);
+        let (status, _) = call::<()>(&app, "POST", "/api/device/heartbeat", Some(&reg.token), Some(beat)).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "only once");
+    }
+
+    #[tokio::test]
+    async fn favorites_follow_the_newest_change() {
+        let app = crate::test_app();
+        let alice = session_token(&app, "alice").await;
+        let bob = session_token(&app, "bob").await;
+        let fav = |name: &str, updated: i64| {
+            serde_json::json!({"id": "f1", "name": name, "host": "mac.local", "updated": updated})
+        };
+        let (status, _) = call::<()>(&app, "PUT", "/api/favorites/f1", Some(&alice), Some(fav("Mac", 10))).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        // An older change from another device doesn't win.
+        call::<()>(&app, "PUT", "/api/favorites/f1", Some(&alice), Some(fav("Alt", 5))).await;
+        let (_, list) = call::<Vec<Favorite>>(&app, "GET", "/api/favorites", Some(&alice), None).await;
+        assert_eq!(list.unwrap()[0].name, "Mac");
+        // Deleting leaves a tombstone without the details.
+        let gone = serde_json::json!({"id": "f1", "name": "Mac", "host": "mac.local", "updated": 20, "deleted": true});
+        call::<()>(&app, "PUT", "/api/favorites/f1", Some(&alice), Some(gone)).await;
+        let (_, list) = call::<Vec<Favorite>>(&app, "GET", "/api/favorites", Some(&alice), None).await;
+        let list = list.unwrap();
+        assert!(list[0].deleted && list[0].host.is_empty());
+        // Everyone has their own.
+        let (_, list) = call::<Vec<Favorite>>(&app, "GET", "/api/favorites", Some(&bob), None).await;
+        assert!(list.unwrap().is_empty());
+        let (status, _) = call::<()>(&app, "PUT", "/api/favorites/f2", Some(&alice), Some(fav("Mac", 30))).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "id must match the path");
+        let (status, _) = call::<()>(&app, "GET", "/api/favorites", None, None).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 

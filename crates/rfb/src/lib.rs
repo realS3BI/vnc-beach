@@ -6,6 +6,7 @@
 pub mod auth;
 pub mod camera;
 pub mod encoding;
+pub mod enroll;
 pub mod files;
 pub mod handshake;
 pub mod io;

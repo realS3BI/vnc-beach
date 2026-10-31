@@ -50,7 +50,11 @@ nonisolated final class AccessFlowTests: XCTestCase {
         failure.lifetime = .keepAlways
         add(failure)
         app.buttons["Zurück"].tap()
-        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch.swipeLeft()
-        app.buttons["Löschen"].tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch.press(forDuration: 1.2)
+        app.buttons["Löschen"].firstMatch.tap()
+        // The confirmation dialog asks once more.
+        XCTAssertTrue(app.buttons["Löschen"].firstMatch.waitForExistence(timeout: 5))
+        app.buttons["Löschen"].firstMatch.tap()
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch.waitForExistence(timeout: 3))
     }
 }

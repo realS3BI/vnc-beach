@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{bail, Context as _};
+use beach_account::api::Device;
 use beach_account::SigningKey;
 use clap::Parser;
 
@@ -47,6 +48,14 @@ struct Args {
     /// become anybody.
     #[arg(long, env = "BEACH_DEV_LOGIN", value_parser = clap::builder::BoolishValueParser::new())]
     dev_login: bool,
+    /// GitHub API address of the latest VNC Beach release; devices older
+    /// than it are marked as outdated. Empty: don't check.
+    #[arg(
+        long,
+        env = "BEACH_RELEASE_URL",
+        default_value = "https://api.github.com/repos/realS3BI/vnc-beach/releases/latest"
+    )]
+    release_url: String,
 }
 
 pub struct App {
@@ -57,6 +66,8 @@ pub struct App {
     /// Without trailing slash.
     pub public_url: String,
     pub name: String,
+    /// The latest release's version (`0.4.1`), once known.
+    pub latest: Mutex<Option<String>>,
 }
 
 impl App {
@@ -77,6 +88,16 @@ impl App {
             ids.push("dev".into());
         }
         ids
+    }
+
+    /// Fills in [`Device::outdated`] from the latest known release.
+    pub fn mark_outdated(&self, devices: &mut [Device]) {
+        let latest = self.latest.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+        if let Some(latest) = latest {
+            for d in devices {
+                d.outdated = beach_account::api::version_older(&d.version, &latest);
+            }
+        }
     }
 
     /// Cookies get `Secure` when the public address is HTTPS.
@@ -125,7 +146,25 @@ async fn main() -> anyhow::Result<()> {
         dev_login: args.dev_login,
         public_url: args.public_url.trim_end_matches('/').to_string(),
         name: args.name,
+        latest: Mutex::new(None),
     });
+    if !args.release_url.is_empty() {
+        let (app, url) = (app.clone(), args.release_url.clone());
+        tokio::spawn(async move {
+            loop {
+                let url = url.clone();
+                match tokio::task::spawn_blocking(move || latest_release(&url)).await {
+                    Ok(Ok(version)) => {
+                        log::debug!("latest release {version}");
+                        *app.latest.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(version);
+                    }
+                    Ok(Err(e)) => log::warn!("cannot check for the latest release: {e}"),
+                    Err(e) => log::warn!("release check failed: {e}"),
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(3 * 3600)).await;
+            }
+        });
+    }
     tokio::spawn({
         let app = app.clone();
         async move {
@@ -155,6 +194,27 @@ pub fn router(app: Shared) -> axum::Router {
         .merge(api::routes())
         .layer(axum::middleware::from_fn_with_state(app.clone(), web::protect))
         .with_state(app)
+}
+
+/// The version of the latest release (`tag_name` without the `v`).
+fn latest_release(url: &str) -> anyhow::Result<String> {
+    #[derive(serde::Deserialize)]
+    struct Release {
+        tag_name: String,
+    }
+    let release: Release = ureq::get(url)
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "beach-coord")
+        .call()?
+        .body_mut()
+        .read_json()?;
+    let version = release.tag_name.trim_start_matches(['v', 'V']).to_string();
+    anyhow::ensure!(
+        beach_account::api::version_older("0.0.0", &version) && version.chars().count() <= 32,
+        "unexpected tag {}",
+        release.tag_name
+    );
+    Ok(version)
 }
 
 /// The Ed25519 key tickets are signed with. Devices pin its public half
@@ -198,5 +258,6 @@ pub fn test_app() -> Shared {
         dev_login: true,
         public_url: "http://beach.test".into(),
         name: "VNC Beach".into(),
+        latest: Mutex::new(Some("0.4.1".into())),
     })
 }

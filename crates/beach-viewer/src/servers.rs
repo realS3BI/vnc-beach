@@ -9,17 +9,31 @@
 //!
 //! [server.settings]                # only the fields that differ from the defaults
 //! colors = "low"
+//!
+//! [[deleted]]                      # removed favorites, so synced viewers remove them too
+//! id = "5b0c…"
+//! updated = 1793466620000
 //! ```
+//!
+//! With an account, favorites are kept in step with the coordination server
+//! (`beach_account::favorites`): `id` and `updated` (Unix milliseconds of
+//! the last change) identify them across viewers. Passwords stay here.
 
 use std::path::PathBuf;
 use std::{fs, io};
 
 use serde::{Deserialize, Serialize};
 
+use beach_account::api::Favorite;
+
 use crate::settings::Overrides;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Server {
+    /// Stable across viewers; empty until the directory assigns one.
+    pub id: String,
+    /// Unix milliseconds of the last change; 0 if never synced.
+    pub updated: i64,
     pub name: String,
     pub host: String,
     /// Plain password in memory; obfuscated on disk.
@@ -32,10 +46,23 @@ pub struct Server {
 struct File {
     #[serde(default, rename = "server")]
     servers: Vec<Entry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    deleted: Vec<Tombstone>,
+}
+
+/// A removed favorite, remembered for the sync.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Tombstone {
+    pub id: String,
+    pub updated: i64,
 }
 
 #[derive(Serialize, Deserialize)]
 struct Entry {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    id: String,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    updated: i64,
     name: String,
     host: String,
     #[serde(default, with = "obfuscated", skip_serializing_if = "String::is_empty")]
@@ -46,9 +73,15 @@ struct Entry {
     access: crate::access::Access,
 }
 
+fn is_zero(n: &i64) -> bool {
+    *n == 0
+}
+
 impl From<&Server> for Entry {
     fn from(s: &Server) -> Self {
         Entry {
+            id: s.id.clone(),
+            updated: s.updated,
             name: s.name.clone(),
             host: s.host.clone(),
             password: s.password.clone(),
@@ -61,6 +94,8 @@ impl From<&Server> for Entry {
 impl From<Entry> for Server {
     fn from(e: Entry) -> Self {
         Server {
+            id: e.id,
+            updated: e.updated,
             name: e.name,
             host: e.host,
             password: e.password,
@@ -95,6 +130,7 @@ pub mod obfuscated {
 
 pub struct Directory {
     pub servers: Vec<Server>,
+    deleted: Vec<Tombstone>,
     path: Option<PathBuf>,
 }
 
@@ -105,7 +141,7 @@ impl Directory {
     }
 
     fn load_from(path: Option<PathBuf>) -> Directory {
-        let servers = path
+        let file = path
             .as_deref()
             .and_then(|p| match fs::read_to_string(p) {
                 Ok(text) => Some(text),
@@ -116,13 +152,27 @@ impl Directory {
                 }
             })
             .map(|text| {
-                parse(&text).unwrap_or_else(|e| {
+                toml::from_str::<File>(&text).unwrap_or_else(|e| {
                     log::warn!("ignoring server directory: {e}");
-                    Vec::new()
+                    File::default()
                 })
             })
             .unwrap_or_default();
-        Directory { servers, path }
+        let mut directory = Directory {
+            servers: file.servers.into_iter().map(Server::from).collect(),
+            deleted: file.deleted,
+            path,
+        };
+        // Favorites from before the sync get their ID once.
+        if directory.servers.iter().any(|s| s.id.is_empty()) {
+            for server in directory.servers.iter_mut().filter(|s| s.id.is_empty()) {
+                server.id = new_id();
+            }
+            if let Err(e) = directory.save() {
+                log::warn!("cannot save favorite IDs: {e}");
+            }
+        }
+        directory
     }
 
     pub fn save(&self) -> io::Result<()> {
@@ -132,7 +182,7 @@ impl Directory {
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir)?;
         }
-        let text = serialize(&self.servers);
+        let text = serialize(&self.servers, &self.deleted);
         let tmp = path.with_extension("toml.tmp");
         fs::write(&tmp, text)?;
         fs::rename(&tmp, path)
@@ -151,16 +201,28 @@ impl Directory {
 
     /// Replaces the server at `index` or, without one, the server with the same
     /// name; otherwise appends. Returns the final index.
-    pub fn upsert(&mut self, index: Option<usize>, server: Server) -> usize {
+    /// Saves `server` as the favorite at `index` (or the one with its
+    /// name), or adds it; either way it counts as changed now.
+    pub fn upsert(&mut self, index: Option<usize>, mut server: Server) -> usize {
         let index = index
             .filter(|&i| i < self.servers.len())
             .or_else(|| self.find(&server.name));
+        server.updated = now_ms();
         match index {
             Some(i) => {
+                if server.id.is_empty() {
+                    server.id = self.servers[i].id.clone();
+                }
+                if server.id.is_empty() {
+                    server.id = new_id();
+                }
                 self.servers[i] = server;
                 i
             }
             None => {
+                if server.id.is_empty() {
+                    server.id = new_id();
+                }
                 self.servers.push(server);
                 self.servers.len() - 1
             }
@@ -169,19 +231,110 @@ impl Directory {
 
     pub fn remove(&mut self, index: usize) {
         if index < self.servers.len() {
-            self.servers.remove(index);
+            let server = self.servers.remove(index);
+            self.deleted.retain(|t| t.id != server.id);
+            self.deleted.push(Tombstone {
+                id: server.id,
+                updated: now_ms(),
+            });
         }
+    }
+
+    /// Everything the sync compares: the favorites and the tombstones.
+    pub fn favorites(&self) -> Vec<Favorite> {
+        let servers = self.servers.iter().map(|s| Favorite {
+            id: s.id.clone(),
+            name: s.name.clone(),
+            host: s.host.clone(),
+            alternatives: s.access.alternatives.clone(),
+            view_only: s.settings.view_only == Some(true),
+            updated: s.updated,
+            deleted: false,
+        });
+        let deleted = self.deleted.iter().map(|t| Favorite {
+            id: t.id.clone(),
+            name: String::new(),
+            host: String::new(),
+            alternatives: Vec::new(),
+            view_only: false,
+            updated: t.updated,
+            deleted: true,
+        });
+        servers.chain(deleted).collect()
+    }
+
+    /// Takes over newer favorites from the server (see
+    /// [`beach_account::favorites::Merged::apply`]); passwords and other
+    /// local settings stay. Returns whether anything changed.
+    pub fn apply(&mut self, remote: &[Favorite]) -> bool {
+        let mut changed = false;
+        for r in remote {
+            let index = self.servers.iter().position(|s| s.id == r.id).or_else(|| {
+                let favorites = self.favorites();
+                favorites
+                    .iter()
+                    .position(|l| beach_account::favorites::same_host(r, l))
+                    .filter(|&i| i < self.servers.len())
+            });
+            if r.deleted {
+                if let Some(i) = index {
+                    self.servers.remove(i);
+                }
+                self.deleted.retain(|t| t.id != r.id);
+                self.deleted.push(Tombstone {
+                    id: r.id.clone(),
+                    updated: r.updated,
+                });
+                changed = true;
+                continue;
+            }
+            if self.deleted.iter().any(|t| t.id == r.id && t.updated >= r.updated) {
+                continue;
+            }
+            self.deleted.retain(|t| t.id != r.id);
+            let server = match index {
+                Some(i) => &mut self.servers[i],
+                None => {
+                    self.servers.push(Server::default());
+                    self.servers.last_mut().unwrap()
+                }
+            };
+            server.id = r.id.clone();
+            server.updated = r.updated;
+            server.name = r.name.clone();
+            server.host = r.host.clone();
+            server.access.alternatives = r.alternatives.clone();
+            server.settings.view_only = r.view_only.then_some(true);
+            changed = true;
+        }
+        changed
     }
 }
 
+/// A new favorite ID, formatted like a UUID (the iOS app uses those).
+fn new_id() -> String {
+    let b: [u8; 16] = rand::random();
+    let hex: String = b.iter().map(|b| format!("{b:02X}")).collect();
+    format!("{}-{}-{}-{}-{}", &hex[..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..])
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
 fn parse(text: &str) -> Result<Vec<Server>, toml::de::Error> {
     let file: File = toml::from_str(text)?;
     Ok(file.servers.into_iter().map(Server::from).collect())
 }
 
-fn serialize(servers: &[Server]) -> String {
+fn serialize(servers: &[Server], deleted: &[Tombstone]) -> String {
     let file = File {
         servers: servers.iter().map(Entry::from).collect(),
+        deleted: deleted.to_vec(),
     };
     let mut text = String::from("# VNC Beach favorites. Passwords are stored in the vncpasswd format,\n# which hides them from a glance but is not encryption.\n\n");
     text.push_str(&toml::to_string(&file).expect("servers serialize"));
@@ -241,6 +394,8 @@ mod tests {
     fn sample() -> Vec<Server> {
         vec![
             Server {
+                id: String::new(),
+                updated: 0,
                 name: "Mac Büro".into(),
                 host: "192.168.1.20".into(),
                 password: "password".into(),
@@ -248,6 +403,8 @@ mod tests {
                 access: Default::default(),
             },
             Server {
+                id: String::new(),
+                updated: 0,
                 name: "Ohne Passwort".into(),
                 host: "mac.local:1".into(),
                 password: String::new(),
@@ -263,7 +420,7 @@ mod tests {
 
     #[test]
     fn round_trips_through_toml() {
-        let text = serialize(&sample());
+        let text = serialize(&sample(), &[]);
         assert!(text.contains("password = \"dbd83cfd727a1458\""), "{text}");
         assert_eq!(text.matches("password =").count(), 1, "{text}");
         assert_eq!(text.matches("[server.settings]").count(), 1, "{text}");
@@ -310,7 +467,7 @@ mod tests {
                 ..Default::default()
             }),
         };
-        let text = serialize(&servers);
+        let text = serialize(&servers, &[]);
         assert_eq!(parse(&text).unwrap(), servers);
         assert_eq!(
             text.matches("password =").count(),
@@ -318,7 +475,7 @@ mod tests {
             "only the existing VNC password is serialized"
         );
         assert!(text.contains("power_shell"));
-        let legacy = serialize(&sample());
+        let legacy = serialize(&sample(), &[]);
         assert!(!legacy.contains("access"));
     }
 
@@ -326,6 +483,7 @@ mod tests {
     fn upsert_and_find() {
         let mut dir = Directory {
             servers: sample(),
+            deleted: Vec::new(),
             path: None,
         };
         assert_eq!(dir.find("mac büro"), Some(0));
@@ -333,6 +491,8 @@ mod tests {
         let i = dir.upsert(
             None,
             Server {
+                id: String::new(),
+                updated: 0,
                 name: "Mac Büro".into(),
                 host: "10.0.0.1".into(),
                 password: String::new(),
@@ -347,6 +507,8 @@ mod tests {
         let i = dir.upsert(
             Some(1),
             Server {
+                id: String::new(),
+                updated: 0,
                 name: "Umbenannt".into(),
                 host: "x".into(),
                 password: String::new(),
@@ -358,6 +520,8 @@ mod tests {
         let i = dir.upsert(
             Some(99),
             Server {
+                id: String::new(),
+                updated: 0,
                 name: "Neu".into(),
                 host: "y".into(),
                 password: String::new(),
@@ -372,18 +536,69 @@ mod tests {
     }
 
     #[test]
+    fn syncs_favorites_by_id_and_keeps_passwords() {
+        let mut dir = Directory {
+            servers: sample(),
+            deleted: Vec::new(),
+            path: None,
+        };
+        let i = dir.upsert(Some(0), dir.servers[0].clone());
+        let id = dir.servers[i].id.clone();
+        assert!(!id.is_empty() && dir.servers[i].updated > 0);
+        let mut ours = dir.favorites();
+        assert_eq!(ours.len(), 2);
+        assert!(!ours[0].view_only && ours[1].view_only);
+
+        // A rename from another viewer keeps the local password.
+        ours[0].name = "Mac Büro 2".into();
+        ours[0].updated += 1;
+        assert!(dir.apply(&ours[..1]));
+        assert_eq!((dir.servers[0].name.as_str(), dir.servers[0].password.as_str()), ("Mac Büro 2", "password"));
+
+        // A favorite from another viewer that never synced here matches by
+        // address instead of doubling.
+        let mut theirs = ours[1].clone();
+        theirs.id = "OTHER".into();
+        theirs.updated = 99;
+        dir.apply(std::slice::from_ref(&theirs));
+        assert_eq!(dir.servers.len(), 2);
+        assert_eq!(dir.servers[1].id, "OTHER");
+
+        // Deleting leaves a tombstone, and a remote one deletes here.
+        dir.remove(0);
+        assert!(dir.favorites().iter().any(|f| f.id == id && f.deleted));
+        theirs.deleted = true;
+        theirs.updated = 100;
+        dir.apply(&[theirs]);
+        assert!(dir.servers.is_empty());
+        assert_eq!(dir.favorites().iter().filter(|f| f.deleted).count(), 2);
+    }
+
+    #[test]
     fn saves_to_disk_and_overwrites() {
         let base = std::env::temp_dir().join(format!("vnc-beach-test-{}", std::process::id()));
         let path = base.join("sub").join("servers.toml");
+        let mut servers = sample();
+        for (i, s) in servers.iter_mut().enumerate() {
+            s.id = format!("id-{i}");
+        }
         let mut dir = Directory {
-            servers: sample(),
+            servers: servers.clone(),
+            deleted: Vec::new(),
             path: Some(path.clone()),
         };
         dir.save().unwrap();
-        assert_eq!(Directory::load_from(Some(path.clone())).servers, sample());
+        assert_eq!(Directory::load_from(Some(path.clone())).servers, servers);
         dir.remove(1);
         dir.save().unwrap();
-        assert_eq!(Directory::load_from(Some(path.clone())).servers, sample()[..1]);
+        let loaded = Directory::load_from(Some(path.clone()));
+        assert_eq!(loaded.servers, servers[..1]);
+        assert!(loaded.favorites().iter().any(|f| f.id == "id-1" && f.deleted));
+        // Favorites from before the sync get IDs when loaded, once.
+        fs::write(&path, serialize(&sample(), &[])).unwrap();
+        let first = Directory::load_from(Some(path.clone())).servers;
+        assert!(first.iter().all(|s| !s.id.is_empty()));
+        assert_eq!(Directory::load_from(Some(path.clone())).servers, first);
         assert!(Directory::load_from(Some(base.join("missing.toml")))
             .servers
             .is_empty());

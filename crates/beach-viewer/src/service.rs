@@ -25,6 +25,12 @@ use std::path::{Path, PathBuf};
 
 use crate::config;
 
+/// Exit code of an agent that replaced the program with a new version (a
+/// remote update, see `background::remote_update`). The Windows service
+/// then stops with an error, and its failure actions start it again from
+/// the new program.
+pub const EXIT_UPDATED: u32 = 0x00BE_AC01;
+
 /// Whether the platform has the service at all.
 pub fn supported() -> bool {
     cfg!(any(windows, target_os = "macos"))
@@ -801,6 +807,7 @@ mod platform {
         let exe = std::env::current_exe()?;
         let mut agent: Option<Agent> = None;
         let mut last_start = None::<Instant>;
+        let mut updated = false;
         loop {
             match stop_rx.recv_timeout(Duration::from_secs(1)) {
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -812,6 +819,10 @@ mod platform {
                 if let Some(code) = a.exit_code() {
                     log::info!("agent exited with {code}");
                     agent = None;
+                    if code == super::EXIT_UPDATED {
+                        updated = true;
+                        break;
+                    }
                 } else if a.session != session {
                     log::info!("console session {} -> {session}, restarting the agent", a.session);
                     agent = None;
@@ -831,6 +842,16 @@ mod platform {
             }
         }
         drop(agent);
+        if updated {
+            // A failure: the service's failure actions restart it, now from
+            // the new program.
+            log::info!("program updated, stopping so the service restarts with it");
+            handle.set_service_status(ServiceStatus {
+                exit_code: ServiceExitCode::ServiceSpecific(super::EXIT_UPDATED),
+                ..status(ServiceState::Stopped, ServiceControlAccept::empty())
+            })?;
+            return Ok(());
+        }
         log::info!("service stopping");
         handle.set_service_status(status(ServiceState::Stopped, ServiceControlAccept::empty()))?;
         Ok(())

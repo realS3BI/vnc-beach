@@ -13,7 +13,9 @@ struct ServerStoreTests {
         store.save(server, password: "geheim")
 
         let reloaded = ServerStore(directory: dir, keychainService: service)
-        #expect(reloaded.servers == [server])
+        #expect(reloaded.servers == store.servers)
+        #expect(reloaded.servers.map(\.host) == [server.host])
+        #expect(reloaded.servers[0].updated != nil)
         #expect(reloaded.password(for: server) == "geheim")
 
         reloaded.remove(server)
@@ -28,8 +30,8 @@ struct ServerStoreTests {
         let store = ServerStore(directory: dir, keychainService: service)
         let pc = Server(name: "Büro-PC", host: "sebastian-pc")
         store.save(pc, password: "x")
-        #expect(store.server(for: URL(string: "vncbeach://sebastian-pc")!) == pc)
-        #expect(store.server(for: URL(string: "vncbeach://b%C3%BCro-pc")!) == pc)
+        #expect(store.server(for: URL(string: "vncbeach://sebastian-pc")!)?.id == pc.id)
+        #expect(store.server(for: URL(string: "vncbeach://b%C3%BCro-pc")!)?.id == pc.id)
         #expect(store.server(for: URL(string: "https://sebastian-pc")!) == nil)
         let fresh = try #require(store.server(for: URL(string: "vncbeach://mac.local:1?password=abc")!))
         #expect(fresh.host == "mac.local:1")

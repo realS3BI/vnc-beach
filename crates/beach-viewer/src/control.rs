@@ -40,6 +40,9 @@ pub struct Status {
     /// The Windows service runs the server, so it is also reachable on the
     /// lock screen and before anyone signs in.
     pub service: bool,
+    /// Program version of the process that runs the server (empty before
+    /// 0.4.1).
+    pub version: String,
 }
 
 /// Who answers on the control channel.

@@ -4,15 +4,16 @@
 //! [`crate::background`]). Talks HTTP through the system `curl` like the
 //! updater, so no TLS stack is linked in.
 
-use std::io::{Read, Write};
-use std::net::{IpAddr, TcpListener};
+use std::io::Write;
+use std::net::IpAddr;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use beach_account::loopback::Loopback;
 use beach_account::api::{
-    ApiError, Device, Heartbeat, Me, RegisterDevice, Registration, TicketRequest, TicketResponse,
-    TokenRequest, TokenResponse,
+    ApiError, Favorite, Device, Heartbeat, HeartbeatResponse, Me, RegisterDevice, Registration, TicketRequest,
+    TicketResponse, TokenRequest, TokenResponse, UpdateResult,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -71,6 +72,9 @@ pub struct Target {
 pub enum Error {
     /// The session or device token is no longer valid.
     Unauthorized,
+    /// The server doesn't know the path or the thing (an older
+    /// coordination server, a removed device), in words for the user.
+    NotFound(String),
     /// Any other answer or a network problem, in words for the user.
     Failed(String),
 }
@@ -79,7 +83,7 @@ impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::Unauthorized => f.write_str("Die Anmeldung ist abgelaufen. Bitte neu anmelden."),
-            Error::Failed(e) => f.write_str(e),
+            Error::NotFound(e) | Error::Failed(e) => f.write_str(e),
         }
     }
 }
@@ -186,7 +190,12 @@ fn call<T: DeserializeOwned>(
             let reason = serde_json::from_str::<ApiError>(body)
                 .map(|e| e.error)
                 .unwrap_or_else(|_| format!("HTTP {status}"));
-            Err(Error::Failed(format!("Koordinationsserver: {reason}")))
+            let reason = format!("Koordinationsserver: {reason}");
+            Err(if status == 404 {
+                Error::NotFound(reason)
+            } else {
+                Error::Failed(reason)
+            })
         }
     }
 }
@@ -215,6 +224,43 @@ pub fn devices(account: &AccountConfig) -> Result<Vec<Device>, Error> {
         Some(&account.token),
         None,
     ))
+}
+
+/// Keeps the favorites in step with the account (see
+/// [`beach_account::favorites`]): sends what is newer here and returns what
+/// is newer there, for [`crate::servers::Directory::apply`]. An older
+/// coordination server without favorites changes nothing.
+pub fn sync_favorites(account: &AccountConfig, local: &[Favorite]) -> Result<Vec<Favorite>, Error> {
+    let remote: Vec<Favorite> = match call("GET", &format!("{}/api/favorites", account.url), Some(&account.token), None)
+    {
+        Ok(list) => list.unwrap_or_default(),
+        Err(Error::NotFound(_)) => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or_default();
+    let merged = beach_account::favorites::merge(local, &remote, now);
+    for f in &merged.push {
+        let url = format!("{}/api/favorites/{}", account.url, f.id);
+        call::<()>("PUT", &url, Some(&account.token), json(f))?;
+    }
+    if !merged.push.is_empty() || !merged.apply.is_empty() {
+        log::info!("favorites: sent {}, received {}", merged.push.len(), merged.apply.len());
+    }
+    Ok(merged.apply)
+}
+
+/// Asks the device to update itself to the latest release.
+pub fn request_update(account: &AccountConfig, id: &str) -> Result<(), Error> {
+    call::<()>(
+        "POST",
+        &format!("{}/api/devices/{id}/update", account.url),
+        Some(&account.token),
+        None,
+    )
+    .map(|_| ())
 }
 
 pub fn logout(account: &AccountConfig) {
@@ -283,19 +329,28 @@ pub fn unregister(link: &DeviceLink) -> Result<(), Error> {
     }
 }
 
-pub fn heartbeat(link: &DeviceLink, port: u16) -> Result<(), Error> {
+/// Sends the heartbeat with the outcome of the last remote update, if
+/// any. Returns whether the coordination server asks for an update.
+pub fn heartbeat(
+    link: &DeviceLink,
+    port: u16,
+    remote_update: bool,
+    update_result: Option<UpdateResult>,
+) -> Result<bool, Error> {
     let hb = Heartbeat {
         addresses: local_addresses(),
         port,
         version: env!("CARGO_PKG_VERSION").into(),
+        remote_update,
+        update_result,
     };
-    call::<()>(
+    let answer = call::<HeartbeatResponse>(
         "POST",
         &format!("{}/api/device/heartbeat", link.url),
         Some(&link.token),
         json(&hb),
-    )
-    .map(|_| ())
+    )?;
+    Ok(answer.is_some_and(|a| a.update))
 }
 
 pub fn platform() -> &'static str {
@@ -354,19 +409,19 @@ pub fn endpoint(address: &str, port: u16) -> String {
 // Signing in
 
 /// A sign-in in progress: the browser was sent to the coordination server,
-/// which sends it back to [`Self::port`] on this machine with a code.
+/// which sends it back to the loopback listener on this machine with a code.
 pub struct Login {
-    listener: TcpListener,
+    loopback: Loopback,
     url: String,
     verifier: String,
 }
 
 impl Login {
     pub fn start(url: &str) -> Result<Login, String> {
-        let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
+        let loopback = Loopback::bind().map_err(|e| e.to_string())?;
         let bytes: [u8; 32] = rand::random();
         Ok(Login {
-            listener,
+            loopback,
             url: url.to_string(),
             verifier: beach_account::b64(&bytes),
         })
@@ -374,10 +429,10 @@ impl Login {
 
     /// The page to open in the browser.
     pub fn browser_url(&self) -> String {
-        let port = self.listener.local_addr().map(|a| a.port()).unwrap_or_default();
         format!(
-            "{}/login?app_port={port}&challenge={}",
+            "{}/login?app_port={}&challenge={}",
             self.url,
+            self.loopback.port(),
             beach_account::challenge(&self.verifier)
         )
     }
@@ -401,71 +456,17 @@ impl Login {
     }
 
     fn wait_for_code(&self, cancel: &AtomicBool) -> Result<String, String> {
-        self.listener.set_nonblocking(true).map_err(|e| e.to_string())?;
         let until = Instant::now() + Duration::from_secs(600);
         while Instant::now() < until {
             if cancel.load(Ordering::Acquire) {
                 return Err("Anmeldung abgebrochen.".into());
             }
-            let mut stream = match self.listener.accept() {
-                Ok((stream, _)) => stream,
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(Duration::from_millis(200));
-                    continue;
-                }
-                Err(e) => return Err(e.to_string()),
-            };
-            let _ = stream.set_nonblocking(false);
-            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-            let mut buf = [0u8; 8192];
-            let n = stream.read(&mut buf).unwrap_or(0);
-            let request = String::from_utf8_lossy(&buf[..n]);
-            match callback_code(&request) {
-                Some(code) => {
-                    let _ = stream.write_all(DONE_PAGE.as_bytes());
-                    return Ok(code);
-                }
-                None => {
-                    let _ = stream.write_all(
-                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                    );
-                }
+            if let Some(code) = self.loopback.accept_code(Duration::from_millis(200))? {
+                return Ok(code);
             }
         }
         Err("Die Anmeldung im Browser hat zu lange gedauert.".into())
     }
-}
-
-const DONE_PAGE: &str = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n\
-<!doctype html><html lang=\"de\"><meta charset=\"utf-8\"><title>VNC Beach</title>\
-<body style=\"font:16px system-ui;background:#FFF8EE;color:#17364A;display:grid;place-items:center;height:90vh\">\
-<div><h1>Angemeldet</h1><p>Du kannst dieses Fenster schließen und zu VNC Beach zurückkehren.</p></div></body></html>";
-
-/// The `code` of `GET /callback?code=… HTTP/1.1`.
-fn callback_code(request: &str) -> Option<String> {
-    let line = request.lines().next()?;
-    let target = line.strip_prefix("GET ")?.split(' ').next()?;
-    let query = target.strip_prefix("/callback?")?;
-    query.split('&').find_map(|pair| {
-        let value = pair.strip_prefix("code=")?;
-        percent_decode(value)
-    })
-}
-
-fn percent_decode(text: &str) -> Option<String> {
-    let mut out = Vec::with_capacity(text.len());
-    let mut bytes = text.bytes();
-    while let Some(b) = bytes.next() {
-        match b {
-            b'%' => {
-                let hex = [bytes.next()?, bytes.next()?];
-                out.push(u8::from_str_radix(std::str::from_utf8(&hex).ok()?, 16).ok()?);
-            }
-            b'+' => out.push(b' '),
-            b => out.push(b),
-        }
-    }
-    String::from_utf8(out).ok()
 }
 
 #[cfg(test)]
@@ -484,16 +485,6 @@ mod tests {
         );
         assert!(normalize_url("").is_err());
         assert!(normalize_url("ftp://x").is_err());
-    }
-
-    #[test]
-    fn reads_the_callback_code() {
-        assert_eq!(
-            callback_code("GET /callback?code=ab%2Bc-_ HTTP/1.1\r\nHost: x\r\n\r\n").as_deref(),
-            Some("ab+c-_")
-        );
-        assert_eq!(callback_code("GET /favicon.ico HTTP/1.1\r\n"), None);
-        assert_eq!(callback_code("POST /callback?code=x HTTP/1.1\r\n"), None);
     }
 
     #[test]

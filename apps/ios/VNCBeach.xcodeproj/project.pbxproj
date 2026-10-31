@@ -8,12 +8,15 @@
 
 /* Begin PBXBuildFile section */
 		00A1BD1FFECEF470A4D948EF /* KeysymTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4108CB6F861CD66EBE3E057E /* KeysymTests.swift */; };
+		03276679EE34BA63BCB82A9B /* AccountSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87FE8F9F1842354EB864F23D /* AccountSection.swift */; };
 		09BFCD56DC56F13BE8AD4370 /* ScreenRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DFDC9AAB63A602EED3F842B /* ScreenRenderer.swift */; };
 		0C1FF049DD449808B741DB8C /* UpdateBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC82760D1D7989C816CD1860 /* UpdateBanner.swift */; };
 		11531D0926BB2B157BDB21DB /* AccessFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10FD0EFFFA9CCB6ADFF3E37D /* AccessFlowTests.swift */; };
 		1377C8A8F1FD5161B0BFEF0B /* AccessSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA065C5BD24F2A5955D9CC6D /* AccessSettings.swift */; };
 		1C7439EB5897743BDA8BAE25 /* AccessSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8271ADFF1A43E4B15DF2FB3 /* AccessSettingsView.swift */; };
+		218F63694971692035C6752A /* AccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D2AC7FD38283E1038F7E9AD /* AccountStore.swift */; };
 		2482581DE994247B6D437E2A /* RemoteSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0253FC239341452BB7880BD9 /* RemoteSession.swift */; };
+		2D9A1543F31E99982E729C36 /* FavoriteSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 213E941838563E24305648A3 /* FavoriteSync.swift */; };
 		2F5FD4D85DC3501589B1309F /* RemoteScreenRepresentable.swift in Sources */ = {isa = PBXBuildFile; fileRef = FED544FD8AE1109B7003E436 /* RemoteScreenRepresentable.swift */; };
 		32C447DD3FB37D074570616B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 892C9961B48C5999570E3DBA /* Assets.xcassets */; };
 		3561F56EBCF1169EDAB2822A /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72A63C0961BF5614404844DD /* Keychain.swift */; };
@@ -24,13 +27,17 @@
 		5F02A936E50CD30D50EFB76C /* ScrollPadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 886137D78B31AFDDFBD5D0A4 /* ScrollPadView.swift */; };
 		669CAEA1C657FB2F946D4F75 /* SessionScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E2DD72B6ABB5B47B29FE65A /* SessionScreen.swift */; };
 		72BB61D9877D6DE5D669A672 /* UpdateCheckerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FE47949D74EC62D1DF0A741 /* UpdateCheckerTests.swift */; };
+		7506C4C33EBC37A4D2FE806E /* Cards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35CC94A04D217A9BC0BE9A97 /* Cards.swift */; };
 		7532438D51992B5363DD8DAF /* ExtraKeysBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97C63C1F8CEBC6008373A53B /* ExtraKeysBar.swift */; };
 		78919DF43B2886CBAD115768 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFF3B595A64B4CAFE6532F9F /* SettingsView.swift */; };
 		7C071FFAAEBB3B9119BF48A2 /* AccessPromptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A42C492E6F74987494004D1F /* AccessPromptView.swift */; };
+		A331EECA881435D8BBCCE337 /* AccountTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F47FEE1AA0BF1A16017F4DA /* AccountTests.swift */; };
 		B5951E373382D4BDF0341601 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 776EDB19322978BDF32596DC /* AppSettings.swift */; };
 		BDDF7E1788D6DE51CECEFA8B /* VNCBeachApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B9745563D5FF4EFD28418F2 /* VNCBeachApp.swift */; };
 		C24A37D53C8D4ABB30082440 /* Keysyms.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AB7FFE5F074BFD24A9E4441 /* Keysyms.swift */; };
 		CB96F243541F28998C73BB7B /* AccessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E421221C7DAFF7E0D35923D /* AccessTests.swift */; };
+		D0DF5D12931711D92523E8C0 /* EnrollView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE1B33B5EDC9CF7B36AC3572 /* EnrollView.swift */; };
+		DBA1E49828120934B8DCFAC1 /* AccountAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DACE1197E8A289B15133C55 /* AccountAPI.swift */; };
 		DE781C76C3807AEEDC3EB54E /* ServerStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C61DB165EEA30D1BAD1DADB /* ServerStoreTests.swift */; };
 		DFFE0D67F00CDDA496A5B228 /* ServerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E30BCB99733277F66C548438 /* ServerStore.swift */; };
 		E3A872DF90EAA47039DE0F73 /* ServerEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B7ED6266419367C539D147 /* ServerEditView.swift */; };
@@ -59,11 +66,15 @@
 /* Begin PBXFileReference section */
 		0253FC239341452BB7880BD9 /* RemoteSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSession.swift; sourceTree = "<group>"; };
 		076659D11F3EDE0F251F1CAD /* Server.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Server.swift; sourceTree = "<group>"; };
+		0D2AC7FD38283E1038F7E9AD /* AccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStore.swift; sourceTree = "<group>"; };
 		0FE47949D74EC62D1DF0A741 /* UpdateCheckerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCheckerTests.swift; sourceTree = "<group>"; };
 		10FD0EFFFA9CCB6ADFF3E37D /* AccessFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessFlowTests.swift; sourceTree = "<group>"; };
 		15B7ED6266419367C539D147 /* ServerEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerEditView.swift; sourceTree = "<group>"; };
 		186D88CCB73C2F8081B7BDAB /* ServerListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerListView.swift; sourceTree = "<group>"; };
+		213E941838563E24305648A3 /* FavoriteSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoriteSync.swift; sourceTree = "<group>"; };
 		2D30A5514684CCD857C9A24D /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
+		2DACE1197E8A289B15133C55 /* AccountAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountAPI.swift; sourceTree = "<group>"; };
+		35CC94A04D217A9BC0BE9A97 /* Cards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Cards.swift; sourceTree = "<group>"; };
 		3AB7FFE5F074BFD24A9E4441 /* Keysyms.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keysyms.swift; sourceTree = "<group>"; };
 		3C61DB165EEA30D1BAD1DADB /* ServerStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerStoreTests.swift; sourceTree = "<group>"; };
 		3DFDC9AAB63A602EED3F842B /* ScreenRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenRenderer.swift; sourceTree = "<group>"; };
@@ -76,6 +87,8 @@
 		740FFA4C55786B40FEC8EFD5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		776EDB19322978BDF32596DC /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		7E2DD72B6ABB5B47B29FE65A /* SessionScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionScreen.swift; sourceTree = "<group>"; };
+		7F47FEE1AA0BF1A16017F4DA /* AccountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountTests.swift; sourceTree = "<group>"; };
+		87FE8F9F1842354EB864F23D /* AccountSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSection.swift; sourceTree = "<group>"; };
 		886137D78B31AFDDFBD5D0A4 /* ScrollPadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollPadView.swift; sourceTree = "<group>"; };
 		892C9961B48C5999570E3DBA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		93D7FD570E795FB1B1F65B90 /* Discovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Discovery.swift; sourceTree = "<group>"; };
@@ -87,6 +100,7 @@
 		AD73F798DBE4766B41567A58 /* SSHKeyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHKeyStore.swift; sourceTree = "<group>"; };
 		BC726F7D014DE20368459D35 /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
 		BFF3B595A64B4CAFE6532F9F /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		CE1B33B5EDC9CF7B36AC3572 /* EnrollView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrollView.swift; sourceTree = "<group>"; };
 		E30BCB99733277F66C548438 /* ServerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerStore.swift; sourceTree = "<group>"; };
 		F8271ADFF1A43E4B15DF2FB3 /* AccessSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessSettingsView.swift; sourceTree = "<group>"; };
 		FA3A76B7834EA3704F18595D /* VNCBeach.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = VNCBeach.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -135,6 +149,9 @@
 			children = (
 				A42C492E6F74987494004D1F /* AccessPromptView.swift */,
 				F8271ADFF1A43E4B15DF2FB3 /* AccessSettingsView.swift */,
+				87FE8F9F1842354EB864F23D /* AccountSection.swift */,
+				35CC94A04D217A9BC0BE9A97 /* Cards.swift */,
+				CE1B33B5EDC9CF7B36AC3572 /* EnrollView.swift */,
 				15B7ED6266419367C539D147 /* ServerEditView.swift */,
 				186D88CCB73C2F8081B7BDAB /* ServerListView.swift */,
 				7E2DD72B6ABB5B47B29FE65A /* SessionScreen.swift */,
@@ -160,6 +177,7 @@
 			isa = PBXGroup;
 			children = (
 				3E421221C7DAFF7E0D35923D /* AccessTests.swift */,
+				7F47FEE1AA0BF1A16017F4DA /* AccountTests.swift */,
 				4108CB6F861CD66EBE3E057E /* KeysymTests.swift */,
 				3C61DB165EEA30D1BAD1DADB /* ServerStoreTests.swift */,
 				0FE47949D74EC62D1DF0A741 /* UpdateCheckerTests.swift */,
@@ -171,7 +189,9 @@
 			isa = PBXGroup;
 			children = (
 				AA065C5BD24F2A5955D9CC6D /* AccessSettings.swift */,
+				0D2AC7FD38283E1038F7E9AD /* AccountStore.swift */,
 				776EDB19322978BDF32596DC /* AppSettings.swift */,
+				213E941838563E24305648A3 /* FavoriteSync.swift */,
 				72A63C0961BF5614404844DD /* Keychain.swift */,
 				076659D11F3EDE0F251F1CAD /* Server.swift */,
 				E30BCB99733277F66C548438 /* ServerStore.swift */,
@@ -215,6 +235,7 @@
 		F631B8A13CB93855985C7E1E /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				2DACE1197E8A289B15133C55 /* AccountAPI.swift */,
 				93D7FD570E795FB1B1F65B90 /* Discovery.swift */,
 				3AB7FFE5F074BFD24A9E4441 /* Keysyms.swift */,
 				0253FC239341452BB7880BD9 /* RemoteSession.swift */,
@@ -372,6 +393,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				CB96F243541F28998C73BB7B /* AccessTests.swift in Sources */,
+				A331EECA881435D8BBCCE337 /* AccountTests.swift in Sources */,
 				00A1BD1FFECEF470A4D948EF /* KeysymTests.swift in Sources */,
 				DE781C76C3807AEEDC3EB54E /* ServerStoreTests.swift in Sources */,
 				72BB61D9877D6DE5D669A672 /* UpdateCheckerTests.swift in Sources */,
@@ -385,9 +407,15 @@
 				7C071FFAAEBB3B9119BF48A2 /* AccessPromptView.swift in Sources */,
 				1377C8A8F1FD5161B0BFEF0B /* AccessSettings.swift in Sources */,
 				1C7439EB5897743BDA8BAE25 /* AccessSettingsView.swift in Sources */,
+				DBA1E49828120934B8DCFAC1 /* AccountAPI.swift in Sources */,
+				03276679EE34BA63BCB82A9B /* AccountSection.swift in Sources */,
+				218F63694971692035C6752A /* AccountStore.swift in Sources */,
 				B5951E373382D4BDF0341601 /* AppSettings.swift in Sources */,
+				7506C4C33EBC37A4D2FE806E /* Cards.swift in Sources */,
 				496331CCB4C68CEA63445449 /* Discovery.swift in Sources */,
+				D0DF5D12931711D92523E8C0 /* EnrollView.swift in Sources */,
 				7532438D51992B5363DD8DAF /* ExtraKeysBar.swift in Sources */,
+				2D9A1543F31E99982E729C36 /* FavoriteSync.swift in Sources */,
 				3561F56EBCF1169EDAB2822A /* Keychain.swift in Sources */,
 				C24A37D53C8D4ABB30082440 /* Keysyms.swift in Sources */,
 				2F5FD4D85DC3501589B1309F /* RemoteScreenRepresentable.swift in Sources */,

@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use anyhow::Context as _;
-use beach_account::api::{Device, Heartbeat, Org, OrgRef, Role, User};
+use beach_account::api::{Device, Favorite, Heartbeat, Org, OrgRef, Role, UpdateResult, UpdateState, User};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use sha2::{Digest, Sha256};
 
@@ -17,6 +17,9 @@ const APP_SESSION_LIFETIME: i64 = 365 * DAY;
 const LOGIN_LIFETIME: i64 = 600;
 const APP_CODE_LIFETIME: i64 = 120;
 pub const INVITE_LIFETIME: i64 = 7 * DAY;
+/// A device told to update that neither restarted with another version nor
+/// reported back within this time counts as failed.
+pub const UPDATE_TIMEOUT: i64 = 15 * 60;
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS users (
@@ -82,7 +85,29 @@ CREATE TABLE IF NOT EXISTS devices (
     created INTEGER NOT NULL,
     CHECK ((user_id IS NULL) != (org_id IS NULL))
 );
+CREATE TABLE IF NOT EXISTS favorites (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    id TEXT NOT NULL,
+    data TEXT NOT NULL,
+    updated INTEGER NOT NULL,
+    PRIMARY KEY (user_id, id)
+);
 ";
+
+/// Favorites (including tombstones) a user may keep.
+pub const MAX_FAVORITES: usize = 1000;
+
+/// Columns added after the first release: `(table, column, definition)`.
+/// Databases created before get them through `ALTER TABLE`.
+const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
+    ("devices", "can_update", "INTEGER NOT NULL DEFAULT 0"),
+    // '', 'requested', 'running' or 'failed'.
+    ("devices", "update_state", "TEXT NOT NULL DEFAULT ''"),
+    ("devices", "update_since", "INTEGER"),
+    // The version the device had when it was told to update.
+    ("devices", "update_from", "TEXT NOT NULL DEFAULT ''"),
+    ("devices", "update_error", "TEXT NOT NULL DEFAULT ''"),
+];
 
 pub fn now() -> i64 {
     std::time::SystemTime::now()
@@ -148,6 +173,15 @@ pub struct DeviceOwner {
     pub registered_by: String,
 }
 
+/// What a user may do with a device.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Access {
+    /// Not visible to them.
+    None,
+    View,
+    Manage,
+}
+
 pub struct Db {
     conn: Connection,
 }
@@ -167,6 +201,16 @@ impl Db {
     fn init(conn: Connection) -> anyhow::Result<Db> {
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.execute_batch(SCHEMA)?;
+        for (table, column, definition) in ADDED_COLUMNS {
+            let exists: bool = conn.query_row(
+                &format!("SELECT COUNT(*) > 0 FROM pragma_table_info('{table}') WHERE name = ?1"),
+                [column],
+                |r| r.get(0),
+            )?;
+            if !exists {
+                conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"))?;
+            }
+        }
         Ok(Db { conn })
     }
 
@@ -500,13 +544,101 @@ impl Db {
             .optional()
     }
 
-    pub fn heartbeat(&self, id: &str, hb: &Heartbeat) -> rusqlite::Result<()> {
+    /// Stores the heartbeat and moves a remote update along. Returns
+    /// whether the device should update now.
+    pub fn heartbeat(&self, id: &str, hb: &Heartbeat) -> rusqlite::Result<bool> {
+        let tx = self.conn.unchecked_transaction()?;
+        let (state, from): (String, String) = self.conn.query_row(
+            "SELECT update_state, update_from FROM devices WHERE id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        let now = now();
+        let mut next: Option<(&str, String)> = None;
+        let mut update = false;
+        match state.as_str() {
+            "running" => match &hb.update_result {
+                Some(UpdateResult::UpToDate) => next = Some(("", String::new())),
+                Some(UpdateResult::Failed { error }) => next = Some(("failed", truncate(error, 500))),
+                // Restarted with the new version.
+                None if hb.version != from => next = Some(("", String::new())),
+                None => {}
+            },
+            "requested" if hb.remote_update => {
+                next = Some(("running", String::new()));
+                update = true;
+            }
+            "requested" => {
+                next = Some((
+                    "failed",
+                    "Diese Version kann nicht aus der Ferne aktualisiert werden.".into(),
+                ))
+            }
+            _ => {}
+        }
         let addresses = serde_json::to_string(&hb.addresses).unwrap_or_else(|_| "[]".into());
         self.conn.execute(
-            "UPDATE devices SET addresses = ?2, port = ?3, version = ?4, last_seen = ?5 WHERE id = ?1",
-            params![id, addresses, hb.port, hb.version, now()],
+            "UPDATE devices SET addresses = ?2, port = ?3, version = ?4, last_seen = ?5, can_update = ?6 WHERE id = ?1",
+            params![id, addresses, hb.port, hb.version, now, hb.remote_update],
+        )?;
+        if let Some((state, error)) = next {
+            self.conn.execute(
+                "UPDATE devices SET update_state = ?2, update_since = ?3, update_from = ?4, update_error = ?5 WHERE id = ?1",
+                params![id, state, now, hb.version, error],
+            )?;
+        }
+        tx.commit()?;
+        Ok(update)
+    }
+
+    /// Asks the device to update at its next heartbeat.
+    pub fn request_update(&self, id: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE devices SET update_state = 'requested', update_since = ?2, update_error = '' WHERE id = ?1",
+            params![id, now()],
         )?;
         Ok(())
+    }
+
+    pub fn favorites(&self, user_id: &str) -> rusqlite::Result<Vec<Favorite>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT data FROM favorites WHERE user_id = ?1 ORDER BY updated")?;
+        let rows = stmt.query_map([user_id], |r| r.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for data in rows {
+            match serde_json::from_str(&data?) {
+                Ok(f) => out.push(f),
+                Err(e) => log::warn!("skipping unreadable favorite: {e}"),
+            }
+        }
+        Ok(out)
+    }
+
+    /// Stores `f` unless the stored one is newer. `Ok(false)`: the user has
+    /// too many favorites already.
+    pub fn put_favorite(&self, user_id: &str, f: &Favorite) -> rusqlite::Result<bool> {
+        let known: bool = self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM favorites WHERE user_id = ?1 AND id = ?2)",
+            params![user_id, f.id],
+            |r| r.get(0),
+        )?;
+        if !known {
+            let count: i64 =
+                self.conn
+                    .query_row("SELECT COUNT(*) FROM favorites WHERE user_id = ?1", [user_id], |r| r.get(0))?;
+            if count as usize >= MAX_FAVORITES {
+                return Ok(false);
+            }
+        }
+        let data = serde_json::to_string(f).expect("favorite serializes");
+        self.conn.execute(
+            "INSERT INTO favorites (user_id, id, data, updated) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (user_id, id) DO UPDATE SET data = excluded.data, updated = excluded.updated
+             WHERE excluded.updated >= favorites.updated",
+            params![user_id, f.id, data, f.updated],
+        )?;
+        Ok(true)
     }
 
     pub fn delete_device(&self, id: &str) -> rusqlite::Result<()> {
@@ -530,6 +662,24 @@ impl Db {
             .optional()
     }
 
+    /// Whether the user may change the device (remove it, update it): their
+    /// personal devices, and an organization's devices as its admin or as
+    /// the member who registered them.
+    pub fn may_manage_device(&self, id: &str, user_id: &str) -> rusqlite::Result<Access> {
+        let Some(owner) = self.device_owner(id)? else {
+            return Ok(Access::None);
+        };
+        Ok(match &owner.org_id {
+            Some(org) => match self.org(org, user_id)? {
+                Some(org) if org.role.can_manage() || owner.registered_by == user_id => Access::Manage,
+                Some(_) => Access::View,
+                None => Access::None,
+            },
+            None if owner.user_id.as_deref() == Some(user_id) => Access::Manage,
+            None => Access::None,
+        })
+    }
+
     /// Devices the user may connect to: their own and those of their
     /// organizations. Personal ones first, then by organization and name.
     pub fn visible_devices(&self, user_id: &str) -> rusqlite::Result<Vec<Device>> {
@@ -545,7 +695,8 @@ impl Db {
 
     fn devices_where(&self, condition: &str, param: &str) -> rusqlite::Result<Vec<Device>> {
         let sql = format!(
-            "SELECT d.id, d.name, d.platform, d.org_id, o.name, d.addresses, d.port, d.last_seen, d.version
+            "SELECT d.id, d.name, d.platform, d.org_id, o.name, d.addresses, d.port, d.last_seen, d.version,
+                    d.can_update, d.update_state, d.update_since, d.update_error
              FROM devices d LEFT JOIN orgs o ON o.id = d.org_id
              WHERE {condition}
              ORDER BY d.org_id IS NOT NULL, o.name COLLATE NOCASE, d.name COLLATE NOCASE"
@@ -557,6 +708,17 @@ impl Db {
             let org_name: Option<String> = r.get(4)?;
             let addresses: String = r.get(5)?;
             let last_seen: Option<i64> = r.get(7)?;
+            let state: String = r.get(10)?;
+            let since: i64 = r.get::<_, Option<i64>>(11)?.unwrap_or(now);
+            let update = match state.as_str() {
+                "requested" => UpdateState::Requested { since },
+                "running" if now - since > UPDATE_TIMEOUT => UpdateState::Failed {
+                    error: "Keine Rückmeldung vom Gerät.".into(),
+                },
+                "running" => UpdateState::Running { since },
+                "failed" => UpdateState::Failed { error: r.get(12)? },
+                _ => UpdateState::Idle,
+            };
             Ok(Device {
                 id: r.get(0)?,
                 name: r.get(1)?,
@@ -567,10 +729,17 @@ impl Db {
                 online: last_seen.is_some_and(|t| now - t <= ONLINE_FOR),
                 last_seen,
                 version: r.get(8)?,
+                can_update: r.get(9)?,
+                outdated: false,
+                update,
             })
         })?;
         rows.collect()
     }
+}
+
+fn truncate(text: &str, chars: usize) -> String {
+    text.chars().take(chars).collect()
 }
 
 fn user_row(r: &Row) -> rusqlite::Result<User> {
@@ -688,6 +857,8 @@ mod tests {
                 addresses: vec!["100.64.0.7".into()],
                 port: 5901,
                 version: "0.3.0".into(),
+                remote_update: false,
+                update_result: None,
             },
         )
         .unwrap();
@@ -700,6 +871,64 @@ mod tests {
         assert!(names(&bob.id).is_empty());
         db.delete_org(&org).unwrap();
         assert_eq!(names(&alice.id), ["Alices Mac"], "org devices go with the org");
+    }
+
+    fn beat(version: &str, remote_update: bool, update_result: Option<UpdateResult>) -> Heartbeat {
+        Heartbeat {
+            addresses: Vec::new(),
+            port: 5901,
+            version: version.into(),
+            remote_update,
+            update_result,
+        }
+    }
+
+    #[test]
+    fn remote_update_runs_until_the_new_version_reports() {
+        let db = Db::memory();
+        let alice = db.sign_in(&identity("Alice")).unwrap();
+        let (id, _) = db.register_device("Mac", "macos", None, &alice.id).unwrap();
+        let state = |db: &Db| db.visible_devices(&alice.id).unwrap()[0].update.clone();
+
+        assert!(!db.heartbeat(&id, &beat("0.4.1", true, None)).unwrap());
+        assert!(db.visible_devices(&alice.id).unwrap()[0].can_update);
+        db.request_update(&id).unwrap();
+        assert!(matches!(state(&db), UpdateState::Requested { .. }));
+        assert!(db.heartbeat(&id, &beat("0.4.1", true, None)).unwrap(), "told once");
+        assert!(matches!(state(&db), UpdateState::Running { .. }));
+        assert!(!db.heartbeat(&id, &beat("0.4.1", true, None)).unwrap());
+        assert!(matches!(state(&db), UpdateState::Running { .. }));
+        assert!(!db.heartbeat(&id, &beat("0.4.2", true, None)).unwrap());
+        assert_eq!(state(&db), UpdateState::Idle);
+
+        db.request_update(&id).unwrap();
+        db.heartbeat(&id, &beat("0.4.2", true, None)).unwrap();
+        db.heartbeat(&id, &beat("0.4.2", true, Some(UpdateResult::Failed { error: "kein Netz".into() })))
+            .unwrap();
+        assert_eq!(state(&db), UpdateState::Failed { error: "kein Netz".into() });
+
+        db.request_update(&id).unwrap();
+        db.heartbeat(&id, &beat("0.4.2", true, None)).unwrap();
+        db.heartbeat(&id, &beat("0.4.2", true, Some(UpdateResult::UpToDate))).unwrap();
+        assert_eq!(state(&db), UpdateState::Idle);
+
+        // A version without remote updates can't follow the request.
+        db.request_update(&id).unwrap();
+        assert!(!db.heartbeat(&id, &beat("0.4.0", false, None)).unwrap());
+        assert!(matches!(state(&db), UpdateState::Failed { .. }));
+    }
+
+    #[test]
+    fn old_databases_get_the_new_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn.execute_batch("ALTER TABLE devices DROP COLUMN can_update").ok();
+        let db = Db::init(conn).unwrap();
+        let alice = db.sign_in(&identity("Alice")).unwrap();
+        db.register_device("PC", "windows", None, &alice.id).unwrap();
+        assert_eq!(db.visible_devices(&alice.id).unwrap()[0].update, UpdateState::Idle);
+        // Running it again on a migrated database is fine.
+        Db::init(db.conn).unwrap();
     }
 
     #[test]

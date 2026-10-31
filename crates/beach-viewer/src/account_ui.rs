@@ -7,7 +7,7 @@ use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use beach_account::api::{Device, Me};
+use beach_account::api::{Device, Favorite, Me, UpdateState};
 use egui::{Margin, RichText, Vec2};
 
 use crate::account::{self, AccountConfig, DeviceLink};
@@ -18,10 +18,13 @@ use crate::theme::{self, Kind, Palette};
 
 /// The device list is fetched again after this long.
 const REFRESH: Duration = Duration::from_secs(30);
+/// Faster while a remote update is pending, to show how it goes.
+const REFRESH_UPDATING: Duration = Duration::from_secs(5);
 
 /// The browser sign-in's result and its cancel flag.
 type LoginTask = (Receiver<Result<AccountConfig, String>>, Arc<AtomicBool>);
-type Refresh = Result<(Me, Vec<Device>), account::Error>;
+/// Profile, devices and the favorites that are newer on the server.
+type Refresh = Result<(Me, Vec<Device>, Vec<Favorite>), account::Error>;
 
 pub struct AccountPanel {
     /// Address field while signed out.
@@ -34,7 +37,11 @@ pub struct AccountPanel {
     error: Option<String>,
     add: Option<AddDialog>,
     link_task: Option<Receiver<Result<Option<DeviceLink>, account::Error>>>,
+    /// Update requests on their way to the coordination server.
+    update_task: Option<Receiver<Result<(), account::Error>>>,
     confirm_remove: bool,
+    /// Favorites from the server, waiting for [`Self::take_favorites`].
+    favorites: Vec<Favorite>,
 }
 
 struct AddDialog {
@@ -55,8 +62,66 @@ impl AccountPanel {
             error: None,
             add: None,
             link_task: None,
+            update_task: None,
             confirm_remove: false,
+            favorites: Vec::new(),
         }
+    }
+
+    /// Whether the user may update the device: personal devices, and an
+    /// organization's as its admin. (Whoever registered an organization
+    /// device may too; the coordination server knows that, the app doesn't.)
+    pub fn may_update(&self, device: &Device) -> bool {
+        if !device.can_update || device.update.pending() {
+            return false;
+        }
+        match (&device.org, &self.me) {
+            (None, _) => true,
+            (Some(org), Some(me)) => me.orgs.iter().any(|o| o.id == org.id && o.role.can_manage()),
+            (Some(_), None) => false,
+        }
+    }
+
+    /// Outdated devices "Alle aktualisieren" applies to.
+    pub fn outdated(&self) -> Vec<Device> {
+        self.devices
+            .iter()
+            .filter(|d| d.outdated && self.may_update(d))
+            .cloned()
+            .collect()
+    }
+
+    /// Update requests are being sent.
+    pub fn requesting(&self) -> bool {
+        self.update_task.is_some()
+    }
+
+    /// Asks the devices to update themselves to the latest release.
+    pub fn request_updates(&mut self, ctx: &egui::Context, config: &Config, devices: Vec<Device>) {
+        if self.update_task.is_some() || devices.is_empty() {
+            return;
+        }
+        // Shown right away; the next refresh brings the server's view.
+        for device in &mut self.devices {
+            if devices.iter().any(|d| d.id == device.id) {
+                device.update = UpdateState::Requested { since: 0 };
+            }
+        }
+        let (tx, rx) = channel();
+        let account = config.account.clone();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let mut result = Ok(());
+            for device in &devices {
+                if let Err(e) = account::request_update(&account, &device.id) {
+                    log::warn!("update request for {}: {e}", device.name);
+                    result = Err(e);
+                }
+            }
+            let _ = tx.send(result);
+            ctx.request_repaint();
+        });
+        self.update_task = Some(rx);
     }
 
     /// The account's devices, as last fetched.
@@ -78,9 +143,20 @@ impl AccountPanel {
         self.error.as_deref()
     }
 
+    /// Favorites that changed on another viewer, for the directory.
+    pub fn take_favorites(&mut self) -> Vec<Favorite> {
+        std::mem::take(&mut self.favorites)
+    }
+
+    /// Syncs with the next frame, e.g. after a favorite changed here.
+    pub fn sync_soon(&mut self) {
+        self.refreshed = None;
+    }
+
     /// Takes the results of the sign-in, the device refresh and the link
-    /// task, and starts the next refresh. Call every frame.
-    pub fn poll(&mut self, ctx: &egui::Context, config: &mut Config) {
+    /// task, and starts the next refresh, which also syncs the favorites
+    /// `local` returns. Call every frame.
+    pub fn poll(&mut self, ctx: &egui::Context, config: &mut Config, local: impl FnOnce() -> Vec<Favorite>) {
         if let Some((rx, _)) = &self.login {
             if let Ok(result) = rx.try_recv() {
                 self.login = None;
@@ -100,9 +176,10 @@ impl AccountPanel {
                 self.refresh = None;
                 self.refreshed = Some(Instant::now());
                 match result {
-                    Ok((me, devices)) => {
+                    Ok((me, devices, favorites)) => {
                         self.me = Some(me);
                         self.devices = devices;
+                        self.favorites.extend(favorites);
                         self.error = None;
                     }
                     Err(account::Error::Unauthorized) => {
@@ -134,20 +211,42 @@ impl AccountPanel {
                 }
             }
         }
-        let stale = self.refreshed.is_none_or(|t| t.elapsed() > REFRESH);
+        if let Some(rx) = &self.update_task {
+            if let Ok(result) = rx.try_recv() {
+                self.update_task = None;
+                if let Err(e) = result {
+                    self.error = Some(format!("Update anfordern fehlgeschlagen: {e}"));
+                }
+                self.refreshed = None;
+            }
+        }
+        let every = if self.devices.iter().any(|d| d.update.pending()) {
+            REFRESH_UPDATING
+        } else {
+            REFRESH
+        };
+        let stale = self.refreshed.is_none_or(|t| t.elapsed() > every);
         if config.account.signed_in() && self.refresh.is_none() && stale {
             let (tx, rx) = channel();
             let account = config.account.clone();
             let ctx = ctx.clone();
+            let local = local();
             std::thread::spawn(move || {
-                let result = account::me(&account).and_then(|me| Ok((me, account::devices(&account)?)));
+                let result = account::me(&account).and_then(|me| {
+                    let devices = account::devices(&account)?;
+                    let favorites = account::sync_favorites(&account, &local).unwrap_or_else(|e| {
+                        log::warn!("favorites sync: {e}");
+                        Vec::new()
+                    });
+                    Ok((me, devices, favorites))
+                });
                 let _ = tx.send(result);
                 ctx.request_repaint();
             });
             self.refresh = Some(rx);
         }
         if config.account.signed_in() {
-            ctx.request_repaint_after(REFRESH);
+            ctx.request_repaint_after(every);
         }
     }
 
@@ -446,8 +545,19 @@ pub fn status(device: &Device) -> String {
     }
 }
 
+/// The card's tag for a device's version: outdated, or how a remote update
+/// goes.
+pub fn update_tag(device: &Device) -> Option<&'static str> {
+    match &device.update {
+        UpdateState::Requested { .. } | UpdateState::Running { .. } => Some("Wird aktualisiert …"),
+        UpdateState::Failed { .. } => Some("Update fehlgeschlagen"),
+        UpdateState::Idle if device.outdated => Some("Update verfügbar"),
+        UpdateState::Idle => None,
+    }
+}
+
 /// This computer's name without `.local`.
-fn computer_name() -> String {
+pub fn computer_name() -> String {
     let name = gethostname::gethostname().to_string_lossy().into_owned();
     name.strip_suffix(".local").unwrap_or(&name).to_string()
 }

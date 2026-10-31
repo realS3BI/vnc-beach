@@ -18,6 +18,10 @@ enum {
     BEACH_EVENT_CLIPBOARD = 1,
     BEACH_EVENT_CLOSED = 2,
     BEACH_EVENT_RESIZED = 3,
+    // The server can join an account; text is its EnrollHello JSON.
+    BEACH_EVENT_ENROLL_HELLO = 4,
+    // The answer to beach_session_enroll; text is an EnrollResult JSON.
+    BEACH_EVENT_ENROLL_RESULT = 5,
 };
 
 enum {
@@ -26,7 +30,7 @@ enum {
     BEACH_REMOTE_APPLE_SCREEN_SHARING = 2,
 };
 
-// Runs on the reader thread. `text` is set for CLIPBOARD and CLOSED and is
+// Runs on the reader thread. `text` is set for CLIPBOARD, CLOSED and ENROLL_* and is
 // only valid during the call.
 typedef void (*BeachEventCallback)(void *context, int32_t kind, const char *text);
 
@@ -34,16 +38,31 @@ typedef void (*BeachEventCallback)(void *context, int32_t kind, const char *text
 // action: 0 connect, 1 SSH sign-in, 2 Wake-on-LAN. Poll yields owned JSON
 // (progress/trust/secret/connected/failed); release it with beach_string_free.
 // The callback context lives until free, or until the transferred session ends.
+// account_json ({"url","token","device"}) may be NULL; with it, http_post is
+// required and an account ticket is preferred over the VNC password.
 typedef struct BeachConnection BeachConnection;
+// Blocking POST of JSON `body` with `token` as bearer token, on a worker
+// thread. Writes the answer body into `answer` and returns the HTTP status,
+// or 0 with a reason in `answer` if the request failed.
+typedef int32_t (*BeachHttpPost)(const char *url, const char *token, const char *body,
+    char *answer, size_t answer_len);
 bool beach_access_validate(const char *json, char *error, size_t error_len);
 BeachConnection *beach_connection_start(const char *address, const char *password,
-    const char *access_json, int32_t action, const char *known_hosts_dir, uint8_t depth,
+    const char *access_json, const char *account_json, BeachHttpPost http_post, int32_t action, const char *known_hosts_dir, uint8_t depth,
     BeachEventCallback callback, void *context, char *error, size_t error_len);
 char *beach_connection_poll(BeachConnection *connection);
 bool beach_connection_answer(BeachConnection *connection, uint64_t id, int32_t kind, const char *value);
 BeachSession *beach_connection_take_session(BeachConnection *connection);
 void beach_connection_free(BeachConnection *connection);
 void beach_string_free(char *text);
+
+// Browser sign-in: a listener on 127.0.0.1 that the coordination server
+// sends the browser back to. wait blocks up to timeout_ms and returns the
+// callback code (release with beach_string_free) or NULL.
+typedef struct BeachLogin BeachLogin;
+BeachLogin *beach_login_start(uint16_t *port);
+char *beach_login_wait(BeachLogin *login, uint32_t timeout_ms);
+void beach_login_free(BeachLogin *login);
 
 // One of the server's displays inside the framebuffer.
 typedef struct BeachScreen {
@@ -73,6 +92,7 @@ void beach_session_wheel(BeachSession *session, uint8_t buttons, uint8_t wheel_b
 void beach_session_key(BeachSession *session, uint32_t keysym, bool down);
 void beach_session_cut_text(BeachSession *session, const char *text);
 void beach_session_refresh(BeachSession *session);
+void beach_session_enroll(BeachSession *session, const char *json);
 uint32_t beach_keysym_for_char(uint32_t scalar);
 void beach_normalize_address(const char *input, char *buf, size_t len);
 

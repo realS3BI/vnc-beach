@@ -15,7 +15,8 @@ fn receive(reader: &mut BufReader<TcpStream>) -> rfb::Result<Response> {
             ServerMessage::Bell
             | ServerMessage::ServerCutText(_)
             | ServerMessage::SetColourMapEntries
-            | ServerMessage::Camera(_) => {}
+            | ServerMessage::Camera(_)
+            | ServerMessage::Enroll(_) => {}
             ServerMessage::FramebufferUpdate { .. } => {
                 return Err(rfb::Error::Protocol("unexpected framebuffer update".into()))
             }

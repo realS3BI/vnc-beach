@@ -7,6 +7,33 @@ use std::path::PathBuf;
 use std::sync::mpsc::{Sender, TryRecvError};
 use zeroize::Zeroizing;
 
+/// Sends `body` (JSON) by POST to `url` with `token` as bearer token,
+/// blocking. Writes the answer's body (NUL-terminated) into `answer` and
+/// returns the HTTP status, or 0 with a reason in `answer` if no answer came.
+pub type HttpPost = unsafe extern "C" fn(
+    url: *const c_char,
+    token: *const c_char,
+    body: *const c_char,
+    answer: *mut c_char,
+    answer_len: usize,
+) -> i32;
+
+fn post_with(post: HttpPost, url: &str, token: &str, body: &str) -> crate::account::Answer {
+    let (url, token, body) = (cstring(url), cstring(token), cstring(body));
+    let mut answer = vec![0 as c_char; 16 * 1024];
+    let status = unsafe { post(url.as_ptr(), token.as_ptr(), body.as_ptr(), answer.as_mut_ptr(), answer.len()) };
+    *answer.last_mut().unwrap() = 0;
+    let text = unsafe { CStr::from_ptr(answer.as_ptr()) }.to_string_lossy().into_owned();
+    match u16::try_from(status) {
+        Ok(status) if status > 0 => Ok((status, text)),
+        _ => Err(text),
+    }
+}
+
+fn cstring(text: &str) -> CString {
+    CString::new(text.replace('\0', "")).unwrap()
+}
+
 pub struct BeachConnection {
     state: Mutex<Preparation>,
     sink: Sink,
@@ -51,6 +78,9 @@ unsafe fn config(json: *const c_char) -> anyhow::Result<Access> {
 
 /// Starts preparation followed by the standard RFB handshake on a worker.
 /// action: 0 connect, 1 SSH sign-in, 2 wake. NULL on invalid configuration.
+/// With `account_json` (`{"url","token","device"}`, see
+/// [`crate::account::Target`]) and `http_post`, an account ticket is
+/// preferred over the VNC password.
 /// # Safety
 /// Strings/buffers must be valid. Context remains alive until free, or until
 /// the transferred session is freed. Callbacks must not free their own handle.
@@ -59,6 +89,8 @@ pub unsafe extern "C" fn beach_connection_start(
     address: *const c_char,
     password: *const c_char,
     access_json: *const c_char,
+    account_json: *const c_char,
+    http_post: Option<HttpPost>,
     action: i32,
     known_hosts_dir: *const c_char,
     depth: u8,
@@ -87,6 +119,15 @@ pub unsafe extern "C" fn beach_connection_start(
                 "Zum Aufwecken auf iPhone und iPad ein Zugangsgerät im LAN des Computers einrichten."
             );
         }
+        let account = match (unsafe { c_str(account_json) }.filter(|s| !s.is_empty()), http_post) {
+            (Some(json), Some(post)) => {
+                let target: crate::account::Target = serde_json::from_str(json)
+                    .map_err(|_| anyhow::anyhow!("Die Kontodaten für die Verbindung sind ungültig."))?;
+                Some((target, post))
+            }
+            (None, _) => None,
+            (Some(_), None) => anyhow::bail!("Für Kontogeräte fehlt der HTTP-Zugang."),
+        };
         let known_hosts = unsafe { c_str(known_hosts_dir) }
             .filter(|s| !s.is_empty())
             .map(PathBuf::from);
@@ -104,9 +145,21 @@ pub unsafe extern "C" fn beach_connection_start(
             known_hosts,
             move |stream| {
                 let notifications = events.clone();
+                let mut tickets = |device: &str, nonce: &[u8; rfb::handshake::TICKET_NONCE_LEN]| match &account {
+                    Some((target, post)) => {
+                        let post = *post;
+                        crate::account::ticket(target, &|url, token, body| post_with(post, url, token, body), device, nonce)
+                    }
+                    None => Err("not signed in".to_string()),
+                };
+                let source: Option<rfb::handshake::TicketSource> = match account {
+                    Some(_) => Some(&mut tickets),
+                    None => None,
+                };
                 let conn = Connection::from_stream(
                     stream,
                     (!password.is_empty()).then_some(password.as_str()),
+                    source,
                     pf,
                     move |event| emit(&notifications, event),
                 )

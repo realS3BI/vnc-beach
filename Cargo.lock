@@ -611,7 +611,9 @@ version = "0.4.0"
 dependencies = [
  "anyhow",
  "beach-access",
+ "beach-account",
  "rfb",
+ "serde",
  "serde_json",
  "zeroize",
 ]
@@ -632,6 +634,7 @@ dependencies = [
  "log",
  "rand",
  "rfb",
+ "serde_json",
  "tempfile",
  "windows 0.62.2",
  "windows-sys 0.61.2",

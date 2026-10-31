@@ -174,6 +174,14 @@ pub fn is_newer(release: &Release) -> bool {
 /// the new version (and the background process, if one was running). The
 /// caller should quit right after `Ok`.
 pub fn install(release: &Release) -> Result<(), String> {
+    let exe = replace(release)?;
+    platform::relaunch(&exe)
+}
+
+/// Downloads `release` and puts it in place of the running program without
+/// starting anything: for the background process and the service agent,
+/// which restart themselves. Returns the new executable.
+pub fn replace(release: &Release) -> Result<PathBuf, String> {
     let url = release
         .asset
         .as_deref()
@@ -181,7 +189,7 @@ pub fn install(release: &Release) -> Result<(), String> {
     let work = std::env::temp_dir().join(format!("vnc-beach-update-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
-    let result = platform::install(url, release.digest.as_deref(), &work);
+    let result = platform::replace(url, release.digest.as_deref(), &work);
     if result.is_err() {
         let _ = std::fs::remove_dir_all(&work);
     }
@@ -315,7 +323,7 @@ mod platform {
         Ok(app.to_path_buf())
     }
 
-    pub fn install(url: &str, digest: Option<&str>, work: &Path) -> Result<(), String> {
+    pub fn replace(url: &str, digest: Option<&str>, work: &Path) -> Result<PathBuf, String> {
         let app = target()?;
         let zip = work.join("update.zip");
         super::download_checked(url, digest, &zip)?;
@@ -357,15 +365,18 @@ mod platform {
             let _ = move_dir(&old, &app);
             return Err(format!("Neue Version lässt sich nicht installieren: {e}"));
         }
+        Ok(app.join("Contents/MacOS/vnc-beach"))
+    }
 
-        let background = super::stop_background();
-        let exe = app.join("Contents/MacOS/vnc-beach");
-        if background {
-            crate::background::spawn(&exe).map_err(|e| e.to_string())?;
+    /// Restarts the background process, if one ran, and opens the viewer.
+    pub fn relaunch(exe: &Path) -> Result<(), String> {
+        if super::stop_background() {
+            crate::background::spawn(exe).map_err(|e| e.to_string())?;
         }
+        let app = exe.ancestors().nth(3).ok_or("Programmpfad unbekannt")?;
         Command::new("open")
             .arg("-n")
-            .arg(&app)
+            .arg(app)
             .spawn()
             .map_err(|e| e.to_string())?;
         Ok(())
@@ -455,7 +466,7 @@ mod platform {
         exe.with_extension("exe.old")
     }
 
-    pub fn install(url: &str, digest: Option<&str>, work: &Path) -> Result<(), String> {
+    pub fn replace(url: &str, digest: Option<&str>, work: &Path) -> Result<PathBuf, String> {
         let exe = target()?;
         let download = work.join("vnc-beach.exe");
         super::download_checked(url, digest, &download)?;
@@ -475,14 +486,18 @@ mod platform {
             return Err(format!("Neue Version lässt sich nicht installieren: {e}"));
         }
         let _ = std::fs::remove_dir_all(work);
+        Ok(exe)
+    }
 
+    /// Restarts the background process, if one ran, and opens the viewer.
+    pub fn relaunch(exe: &Path) -> Result<(), String> {
         if super::stop_background() {
-            Command::new(&exe)
+            Command::new(exe)
                 .arg("--background")
                 .spawn()
                 .map_err(|e| e.to_string())?;
         }
-        Command::new(&exe).spawn().map_err(|e| e.to_string())?;
+        Command::new(exe).spawn().map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -501,7 +516,11 @@ mod platform {
         Err("Selbst-Update gibt es nur unter macOS und Windows.".into())
     }
 
-    pub fn install(_url: &str, _digest: Option<&str>, _work: &Path) -> Result<(), String> {
+    pub fn replace(_url: &str, _digest: Option<&str>, _work: &Path) -> Result<PathBuf, String> {
+        Err("Selbst-Update gibt es nur für macOS und Windows.".into())
+    }
+
+    pub fn relaunch(_exe: &Path) -> Result<(), String> {
         target().map(|_| ())
     }
 

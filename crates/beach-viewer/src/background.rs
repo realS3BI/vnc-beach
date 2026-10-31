@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use beach_account::api::UpdateResult;
 use beach_server::{Options, Server};
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{TrayIcon, TrayIconBuilder, TrayIconEvent};
@@ -18,6 +19,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 
 use crate::config::{self, Config};
 use crate::control::{self, Command, Endpoint, Status};
+use crate::update::{self, Version};
 use crate::{account, autostart, icon, service};
 
 pub fn run() -> anyhow::Result<()> {
@@ -30,10 +32,12 @@ pub fn run() -> anyhow::Result<()> {
         log::info!("started as a child process, starting again through LaunchServices");
         return Ok(spawn(&std::env::current_exe()?)?);
     }
-    let state = Arc::new(Mutex::new(State::load(Role::Tray, None)));
+    update::clean_up();
+    let state = State::shared(Role::Tray, None);
     state.lock().unwrap().apply();
     let quit = Arc::new(AtomicBool::new(false));
     spawn_heartbeat(state.clone());
+    spawn_follow_service(state.clone());
     control::serve(Endpoint::Tray, {
         let (state, quit) = (state.clone(), quit.clone());
         move |cmd| handle(&state, &quit, cmd)
@@ -128,7 +132,8 @@ fn relaunch_needed() -> bool {
 /// macOS login window agent) runs it, without a tray icon. `home` is the
 /// root for file transfers.
 pub fn run_agent(home: Option<std::path::PathBuf>) -> anyhow::Result<()> {
-    let state = Arc::new(Mutex::new(State::load(Role::Agent, home)));
+    update::clean_up();
+    let state = State::shared(Role::Agent, home);
     state.lock().unwrap().apply();
     let quit = Arc::new(AtomicBool::new(false));
     spawn_heartbeat(state.clone());
@@ -169,14 +174,69 @@ fn agent_loop(state: &Mutex<State>, quit: &AtomicBool) {
     control::forget(Endpoint::Service);
 }
 
+/// Stores a registration a viewer obtained for this computer
+/// (`rfb::enroll`) as if it had been added in the settings here.
+struct StateEnroller(std::sync::Weak<Mutex<State>>);
+
+impl beach_server::session::Enroller for StateEnroller {
+    fn hello(&self) -> beach_account::api::EnrollHello {
+        let device = self.0.upgrade().and_then(|state| {
+            let st = state.lock().unwrap();
+            st.config.server.device.as_ref().map(|d| beach_account::api::EnrolledDevice {
+                url: d.url.clone(),
+                id: d.id.clone(),
+                name: d.name.clone(),
+            })
+        });
+        beach_account::api::EnrollHello {
+            name: crate::account_ui::computer_name(),
+            platform: account::platform().into(),
+            device,
+        }
+    }
+
+    fn enroll(&self, e: beach_account::api::Enrollment) -> Result<(), String> {
+        if beach_account::decode_key(&e.coordinator_key).is_none() || e.id.is_empty() || e.token.is_empty() {
+            return Err("Die Kontodaten sind unvollständig.".into());
+        }
+        let url = account::normalize_url(&e.url)?;
+        let state = self.0.upgrade().ok_or("VNC Beach wird gerade beendet.")?;
+        let mut st = state.lock().unwrap();
+        let mut fresh = config::load();
+        if let Some(d) = &fresh.server.device {
+            return Err(format!(
+                "Dieser Computer ist schon im Konto als „{}“ ({}). Entferne ihn dort zuerst.",
+                d.name, d.url
+            ));
+        }
+        fresh.server.device = Some(account::DeviceLink {
+            url,
+            id: e.id,
+            token: e.token,
+            key: e.coordinator_key,
+            name: e.name.trim().to_string(),
+            owner: e.owner,
+        });
+        config::save(&fresh).map_err(|e| format!("Die Einstellungen konnten nicht gespeichert werden: {e}"))?;
+        st.config = fresh;
+        st.apply();
+        Ok(())
+    }
+}
+
 /// Reports this computer's addresses to the coordination server every
 /// minute while the server runs here (not in a tray process that left the
 /// server to the Windows service). A rejected device token means the device
-/// was removed from the account: the link is dropped.
+/// was removed from the account: the link is dropped. When the answer asks
+/// for an update, it runs here ([`remote_update`]).
 fn spawn_heartbeat(state: Arc<Mutex<State>>) {
     let spawned = std::thread::Builder::new().name("heartbeat".into()).spawn(move || {
         let mut sent: Option<(account::DeviceLink, u16)> = None;
         let mut next = Instant::now();
+        // Reported with the next heartbeat that gets through.
+        let mut result: Option<UpdateResult> = None;
+        let role = state.lock().unwrap().role;
+        let can_update = can_update(role);
         loop {
             std::thread::sleep(Duration::from_secs(5));
             let wanted = {
@@ -194,8 +254,17 @@ fn spawn_heartbeat(state: Arc<Mutex<State>>) {
                 continue;
             }
             let (link, port) = &wanted;
-            match account::heartbeat(link, *port) {
-                Ok(()) => log::debug!("heartbeat sent to {}", link.url),
+            match account::heartbeat(link, *port, can_update, result.clone()) {
+                Ok(false) => {
+                    log::debug!("heartbeat sent to {}", link.url);
+                    result = None;
+                }
+                Ok(true) => {
+                    result = Some(remote_update(&state));
+                    // Report the outcome right away.
+                    sent = None;
+                    continue;
+                }
                 Err(account::Error::Unauthorized) => {
                     log::warn!("device {} is no longer registered at {}", link.id, link.url);
                     let mut st = state.lock().unwrap();
@@ -217,6 +286,103 @@ fn spawn_heartbeat(state: Arc<Mutex<State>>) {
     });
     if let Err(e) = spawned {
         log::warn!("cannot start the heartbeat: {e}");
+    }
+}
+
+/// Whether this process can update itself when the coordination server
+/// asks. The macOS login window agent runs as root and would leave the app
+/// owned by root, so only the tray process does it there.
+fn can_update(role: Role) -> bool {
+    let allowed = role == Role::Tray || cfg!(windows);
+    allowed && update::can_install().is_ok()
+}
+
+/// Updates to the latest release and restarts with it; returns only when
+/// that didn't happen, with the reason for the coordination server.
+fn remote_update(state: &Mutex<State>) -> UpdateResult {
+    log::info!("the coordination server asks for an update");
+    let release = match update::latest() {
+        Ok(release) => release,
+        Err(error) => return UpdateResult::Failed { error },
+    };
+    if !update::is_newer(&release) {
+        log::info!("already up to date ({})", Version::current());
+        return UpdateResult::UpToDate;
+    }
+    match update::replace(&release) {
+        Ok(exe) => {
+            log::info!("updated to {}, restarting", release.version);
+            restart(state, &exe)
+        }
+        Err(error) => {
+            log::warn!("remote update failed: {error}");
+            UpdateResult::Failed { error }
+        }
+    }
+}
+
+/// Ends this process after an update so the new program takes over: the
+/// tray process starts its successor, the Windows service restarts the
+/// agent (see `service::EXIT_UPDATED`).
+fn restart(state: &Mutex<State>, exe: &std::path::Path) -> ! {
+    let role = {
+        let mut st = state.lock().unwrap();
+        if let Some(server) = st.server.take() {
+            server.stop();
+        }
+        st.role
+    };
+    match role {
+        Role::Tray => {
+            // Without the port file the successor doesn't see this process
+            // as already running.
+            control::forget(Endpoint::Tray);
+            if let Err(e) = spawn(exe) {
+                log::error!("cannot start the updated program: {e}");
+            }
+            std::process::exit(0)
+        }
+        Role::Agent => {
+            control::forget(Endpoint::Service);
+            std::process::exit(service::EXIT_UPDATED as i32)
+        }
+    }
+}
+
+/// While the Windows service runs the server, a remote update replaces only
+/// the service's copy. The tray process notices the newer version there and
+/// updates its own copy (no administrator rights needed), once per version.
+fn spawn_follow_service(state: Arc<Mutex<State>>) {
+    let spawned = std::thread::Builder::new().name("follow-service".into()).spawn(move || {
+        let mut tried: Option<Version> = None;
+        loop {
+            std::thread::sleep(Duration::from_secs(60));
+            if !state.lock().unwrap().delegated() || update::can_install().is_err() {
+                continue;
+            }
+            let Some(status) = control::call_at(Endpoint::Service, Command::Status) else {
+                continue;
+            };
+            let Some(service) = Version::parse(&status.version) else {
+                continue;
+            };
+            if service <= Version::current() || tried == Some(service) {
+                continue;
+            }
+            tried = Some(service);
+            log::info!("the service runs {service}, updating this copy");
+            match update::latest() {
+                Ok(release) if update::is_newer(&release) => match update::replace(&release) {
+                    Ok(exe) => restart(&state, &exe),
+                    Err(e) => log::warn!("update failed: {e}"),
+                },
+                Ok(_) => log::info!("no newer release found"),
+                Err(e) => log::warn!("update check failed: {e}"),
+            }
+        }
+    });
+    if let Err(e) = spawned {
+        log::warn!("cannot watch the service version: {e}");
     }
 }
 
@@ -264,9 +430,18 @@ struct State {
     /// Options the running server was started with.
     running: Option<Options>,
     error: Option<String>,
+    /// Lets viewers add this computer to their account.
+    enroller: Option<Arc<dyn beach_server::session::Enroller>>,
 }
 
 impl State {
+    fn shared(role: Role, home: Option<std::path::PathBuf>) -> Arc<Mutex<State>> {
+        let state = Arc::new(Mutex::new(State::load(role, home)));
+        let enroller = Arc::new(StateEnroller(Arc::downgrade(&state)));
+        state.lock().unwrap().enroller = Some(enroller);
+        state
+    }
+
     fn load(role: Role, home: Option<std::path::PathBuf>) -> State {
         let mut config = config::load();
         if config.server.password.is_empty() {
@@ -289,6 +464,7 @@ impl State {
             server: None,
             running: None,
             error: None,
+            enroller: None,
         }
     }
 
@@ -342,6 +518,19 @@ impl State {
         if wanted == self.running {
             return;
         }
+        // Joining or leaving an account must not drop the viewers (the one
+        // that just added this computer among them).
+        if let (Some(wanted), Some(running), Some(server)) = (&wanted, &self.running, &self.server) {
+            let same = Options {
+                tickets: running.tickets.clone(),
+                ..wanted.clone()
+            };
+            if same == *running {
+                server.set_tickets(wanted.tickets.clone());
+                self.running = Some(wanted.clone());
+                return;
+            }
+        }
         if let Some(server) = self.server.take() {
             server.stop();
         }
@@ -350,6 +539,9 @@ impl State {
         if let Some(opts) = wanted {
             match Server::start(opts.clone()) {
                 Ok(server) => {
+                    if let Some(enroller) = &self.enroller {
+                        server.set_enroller(enroller.clone());
+                    }
                     self.server = Some(server);
                     self.running = Some(opts);
                 }
@@ -420,6 +612,7 @@ impl State {
             // The agent runs as SYSTEM and can't see the user's Run key.
             autostart: self.role == Role::Tray && autostart::enabled(),
             service: self.role == Role::Agent,
+            version: env!("CARGO_PKG_VERSION").into(),
         }
     }
 }

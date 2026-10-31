@@ -9,6 +9,8 @@
 //! it stored when it was registered.
 
 pub mod api;
+pub mod favorites;
+pub mod loopback;
 pub mod ticket;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;

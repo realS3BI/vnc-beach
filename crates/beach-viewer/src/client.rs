@@ -281,6 +281,10 @@ impl Reader {
                     Some(camera) => camera.handle(msg),
                     None => return Err(Error::Protocol("camera was not negotiated".into())),
                 },
+                // The desktop viewer doesn't offer BEACH_ENROLL (yet).
+                ServerMessage::Enroll(_) => {
+                    return Err(Error::Protocol("enrollment was not negotiated".into()));
+                }
                 ServerMessage::Bell | ServerMessage::SetColourMapEntries => {}
             }
         }

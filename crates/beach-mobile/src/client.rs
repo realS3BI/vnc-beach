@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rfb::encoding;
-use rfb::handshake::client_handshake_with_banner;
+use rfb::handshake::{client_handshake_secure, TicketSource};
 use rfb::io::ReadExt;
 use rfb::messages::{self, ClientMessage, Rect, ServerMessage};
 use rfb::zrle::ZrleDecoder;
@@ -74,6 +74,11 @@ pub enum Event {
     Resized,
     Clipboard(String),
     Closed(String),
+    /// The server can be added to an account (`rfb::enroll`): its
+    /// `EnrollHello` as JSON.
+    EnrollHello(String),
+    /// The answer to [`Connection::enroll`]: an `EnrollResult` as JSON.
+    EnrollResult(String),
 }
 
 /// What kind of server we are talking to; drives modifier mapping.
@@ -122,19 +127,21 @@ impl Connection {
         pf: PixelFormat,
         on_event: impl Fn(Event) + Send + 'static,
     ) -> rfb::Result<Connection> {
-        Self::from_stream(connect(addr)?, password, pf, on_event)
+        Self::from_stream(connect(addr)?, password, None, pf, on_event)
     }
 
     /// Continues on an existing socket, matching the desktop client's entry point.
+    /// With `tickets`, the server is asked for an account ticket first.
     pub fn from_stream(
         mut stream: TcpStream,
         password: Option<&str>,
+        tickets: Option<TicketSource>,
         pf: PixelFormat,
         on_event: impl Fn(Event) + Send + 'static,
     ) -> rfb::Result<Connection> {
         stream.set_nodelay(true)?;
         stream.set_read_timeout(Some(Duration::from_secs(15)))?;
-        let (init, banner) = client_handshake_with_banner(&mut stream, password)?;
+        let (init, banner) = client_handshake_secure(&mut stream, password, tickets)?;
         let remote = RemoteKind::detect(&banner, &init.name);
         stream.set_read_timeout(None)?;
 
@@ -148,6 +155,7 @@ impl Connection {
             encoding::RAW,
             encoding::EXTENDED_DESKTOP_SIZE,
             encoding::DESKTOP_SIZE,
+            encoding::BEACH_ENROLL,
         ])
         .write(&mut writer)?;
         request((0, 0, w, h), false).write(&mut writer)?;
@@ -180,6 +188,12 @@ impl Connection {
 
     pub fn send(&self, msgs: &[ClientMessage]) {
         let _ = send(&self.writer, msgs);
+    }
+
+    /// Hands the server a registration (`Enrollment` JSON) after it sent
+    /// [`Event::EnrollHello`]; the answer arrives as [`Event::EnrollResult`].
+    pub fn enroll(&self, json: &str) {
+        self.send(&[ClientMessage::Enroll(rfb::enroll::ClientMessage::Enroll(json.to_string()))]);
     }
 
     /// Asks for the shown region again, e.g. after the app was suspended.
@@ -303,6 +317,12 @@ impl Reader {
                 }
                 ServerMessage::Camera(_) => {
                     return Err(Error::Protocol("camera was not negotiated".into()));
+                }
+                ServerMessage::Enroll(rfb::enroll::ServerMessage::Hello(json)) => {
+                    (self.on_event)(Event::EnrollHello(json));
+                }
+                ServerMessage::Enroll(rfb::enroll::ServerMessage::Result(json)) => {
+                    (self.on_event)(Event::EnrollResult(json));
                 }
                 ServerMessage::Bell | ServerMessage::SetColourMapEntries => {}
             }

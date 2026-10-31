@@ -13,6 +13,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                AccountSection()
                 Section("Darstellung") {
                     Picker("Farben", selection: $colorDepth) {
                         ForEach(ColorDepth.allCases) { depth in

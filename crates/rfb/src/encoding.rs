@@ -13,3 +13,6 @@ pub const BEACH_FILE_TRANSFER: i32 = 0x42465401;
 
 /// Experimental VNC Beach camera v1 (BCM1), not an IANA assignment.
 pub const BEACH_CAMERA: i32 = 0x42434D01;
+
+/// Experimental VNC Beach enrollment v1 (BEN1), not an IANA assignment.
+pub const BEACH_ENROLL: i32 = 0x42454E01;
