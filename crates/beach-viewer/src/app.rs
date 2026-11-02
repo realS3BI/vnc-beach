@@ -46,7 +46,7 @@ pub struct App {
     /// Search text over the favorites (only shown for longer lists).
     filter: String,
     editor: Option<Editor>,
-    /// Favorite waiting for "Wirklich löschen?".
+    /// Saved connection waiting for "Wirklich löschen?".
     confirm_delete: Option<usize>,
     /// The one connection being prepared.
     pending: Option<Pending>,
@@ -74,7 +74,7 @@ struct Editor {
     show_password: bool,
     /// The per-connection settings are unfolded.
     settings_open: bool,
-    /// "Favorit löschen" waits for a second click.
+    /// "Verbindung löschen" waits for a second click.
     confirm_delete: bool,
     error: Option<String>,
     /// Why the editor opened on its own, e.g. the server wants a password.
@@ -575,7 +575,7 @@ impl App {
         editor.hint = None;
         if !self.save_directory() {
             if let Some(editor) = &mut self.editor {
-                editor.error = Some("Der Favorit konnte nicht gespeichert werden.".into());
+                editor.error = Some("Die Verbindung konnte nicht gespeichert werden.".into());
             }
         }
     }
@@ -747,9 +747,9 @@ impl App {
                                 ui.add_space(20.0);
                                 self.banners(ui, &ctx);
                                 ui.add_enabled_ui(!connecting, |ui| {
-                                    self.favorites(ui, &ctx);
-                                    ui.add_space(28.0);
                                     self.account_section(ui, &ctx);
+                                    ui.add_space(28.0);
+                                    self.favorites(ui, &ctx);
                                     ui.add_space(28.0);
                                     self.this_computer(ui, &ctx);
                                 });
@@ -829,7 +829,7 @@ impl App {
                 ui.set_width(ui.available_width());
                 ui.horizontal_wrapped(|ui| {
                     ui.label(
-                        RichText::new(format!("„{name}“ aus den Favoriten löschen?"))
+                        RichText::new(format!("Verbindung „{name}“ löschen?"))
                             .font(theme::semibold(14.0))
                             .color(p.text),
                     );
@@ -848,14 +848,19 @@ impl App {
         }
     }
 
+    /// "Weitere Verbindungen": computers saved by hand (other VNC servers,
+    /// machines outside the account). The account's devices above are the
+    /// main way to connect, so this section stays quiet when it is empty.
     fn favorites(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let p = Palette::of(ui);
         let count = self.directory.servers.len();
         ui.horizontal(|ui| {
-            let heading = theme::section_header(ui, "Favoriten", Some(count));
+            let heading = theme::section_header(ui, "Weitere Verbindungen", Some(count));
+            let mut hint = String::from("Selbst gespeicherte Computer, etwa fremde VNC-Server oder Rechner ohne Konto.");
             if let Some(path) = self.directory.path() {
-                heading.on_hover_text(format!("Gespeichert in {}", path.display()));
+                hint.push_str(&format!("\nGespeichert in {}", path.display()));
             }
+            heading.on_hover_text(hint);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if theme::Button::new("+ Neu", Kind::Secondary)
                     .small()
@@ -868,7 +873,7 @@ impl App {
                 if count >= 8 {
                     ui.add(
                         egui::TextEdit::singleline(&mut self.filter)
-                            .hint_text("Favoriten durchsuchen")
+                            .hint_text("Verbindungen durchsuchen")
                             .margin(Margin::symmetric(10, 5))
                             .desired_width(200.0),
                     );
@@ -879,25 +884,21 @@ impl App {
         });
         ui.add_space(10.0);
         if count == 0 {
-            theme::card(ui).inner_margin(Margin::same(20)).show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.label(RichText::new("Noch keine Favoriten").font(theme::semibold(15.0)).color(p.text));
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new(
-                        "Oben eine Adresse eingeben und verbinden, oder Name, Adresse und Passwort eines \
-                         Computers als Favorit speichern. Favoriten verbinden sich mit einem Klick.",
-                    )
-                    .color(p.weak),
-                );
-                ui.add_space(10.0);
-                if theme::Button::new("+ Ersten Favoriten anlegen", Kind::Primary)
-                    .show(ui)
-                    .clicked()
-                {
-                    self.open_editor(None);
-                }
+            ui.label(
+                RichText::new(
+                    "Für Computer ohne VNC Beach oder außerhalb deines Kontos: Name, Adresse und Passwort \
+                     speichern, dann verbindet ein Klick.",
+                )
+                .color(p.weak),
+            );
+            ui.add_space(10.0);
+            let mut add = false;
+            cards::grid(ui, 1, |ui, _, size| {
+                add = cards::add_card(ui, size).clicked();
             });
+            if add {
+                self.open_editor(None);
+            }
             return;
         }
         let filter = self.filter.trim().to_lowercase();
@@ -908,7 +909,7 @@ impl App {
             })
             .collect();
         if shown.is_empty() {
-            ui.label(RichText::new("Kein Favorit passt zur Suche.").color(p.weak));
+            ui.label(RichText::new("Keine Verbindung passt zur Suche.").color(p.weak));
             return;
         }
         let mut connect = None;
@@ -986,8 +987,7 @@ impl App {
                 ui.label(RichText::new(&self.config.account.name).color(p.weak));
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let label = if signed_in { "Konto verwalten" } else { "Anmelden …" };
-                if theme::Button::new(label, Kind::Ghost).small().show(ui).clicked() {
+                if signed_in && theme::Button::new("Konto verwalten", Kind::Ghost).small().show(ui).clicked() {
                     self.open_settings(ctx, Tab::Account);
                 }
                 if signed_in && self.account.requesting() {
@@ -1017,7 +1017,7 @@ impl App {
                 ui.add_space(4.0);
                 ui.label(
                     RichText::new(
-                        "Mit einem Konto erscheinen hier alle deine Geräte und die deines Teams, und du \
+                        "Mit einem Konto erscheinen hier alle deine Computer und die deines Teams, und du \
                          verbindest dich ohne VNC-Passwort.",
                     )
                     .color(p.weak),
@@ -1025,6 +1025,10 @@ impl App {
                 if let Some(e) = self.account.error() {
                     ui.add_space(4.0);
                     ui.label(RichText::new(e).size(12.5).color(theme::CORAL));
+                }
+                ui.add_space(10.0);
+                if theme::Button::new("Anmelden …", Kind::Primary).show(ui).clicked() {
+                    self.open_settings(ctx, Tab::Account);
                 }
             });
             return;
@@ -1238,7 +1242,7 @@ impl App {
                 ui.set_width(width);
                 let p = Palette::of(ui);
                 let (title, subtitle) = if saved.is_some() {
-                    ("Favorit bearbeiten", "Änderungen gelten, sobald du speicherst.")
+                    ("Verbindung bearbeiten", "Änderungen gelten, sobald du speicherst.")
                 } else {
                     ("Neue Verbindung", "Adresse des VNC-Servers, optional mit Name und Passwort.")
                 };
@@ -1396,7 +1400,7 @@ fn editor_buttons(
         {
             action = Some(EditorAction::Connect(Action::Connect));
         }
-        let label = if saved { "Speichern" } else { "Als Favorit speichern" };
+        let label = if saved { "Speichern" } else { "Verbindung speichern" };
         if theme::Button::new(label, Kind::Secondary)
             .enabled(has_host && (modified || !saved))
             .min_size(half)
@@ -1432,7 +1436,7 @@ fn editor_buttons(
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = gap;
         if let Some(index) = editor.index {
-            let label = if editor.confirm_delete { "Wirklich löschen?" } else { "Favorit löschen" };
+            let label = if editor.confirm_delete { "Wirklich löschen?" } else { "Verbindung löschen" };
             let delete = theme::Button::new(label, Kind::Danger).small().show(ui);
             if delete.clicked() {
                 if editor.confirm_delete {
@@ -1630,7 +1634,7 @@ impl App {
         };
         ui.label(RichText::new("Standardeinstellungen").font(theme::bold(17.0)).color(p.text));
         ui.label(
-            RichText::new("Gelten für jede Verbindung, bei der im Favoriten nichts anderes eingestellt ist.")
+            RichText::new("Gelten für jede gespeicherte Verbindung, die nichts anderes einstellt.")
                 .color(p.weak),
         );
         ui.add_space(12.0);

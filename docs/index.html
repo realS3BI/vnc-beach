@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VNC Beach – Bildschirm teilen, ganz entspannt</title>
-<meta name="description" content="VNC Beach ist ein kostenloser VNC-Server und -Viewer für macOS und Windows, mit Viewer-App für iPad und iPhone. Standard-VNC (RFB 3.8), Favoriten, Server im Hintergrund, erreichbar vor der Anmeldung.">
+<meta name="description" content="VNC Beach ist ein kostenloser VNC-Server und -Viewer für macOS und Windows, mit Viewer-App für iPad und iPhone. Standard-VNC (RFB 3.8), Konto mit allen eigenen Computern, Server im Hintergrund, erreichbar vor der Anmeldung.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="icon" href="favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -289,7 +289,7 @@
         <p class="fine">Builds für Windows und macOS liegen bei den GitHub-Releases. Wer mag, baut selbst mit <code>cargo</code>.</p>
       </div>
       <figure class="postcard" aria-label="Postkarte mit einem Screenshot von VNC Beach">
-        <img class="photo" src="screenshot-viewer.png" alt="Der VNC-Beach-Viewer: links die Favoritenliste und der Status des eigenen Servers, rechts das Formular für eine Verbindung." width="1100" height="700">
+        <img class="photo" src="screenshot-viewer.png" alt="Der VNC-Beach-Viewer: links die gespeicherten Verbindungen und der Status des eigenen Servers, rechts das Formular für eine Verbindung." width="1100" height="700">
         <div class="back">
           <div class="note">Grüße vom anderen Rechner!<br>Bin in 5 Minuten am PC daheim – ohne aufzustehen.</div>
           <div class="address">
@@ -347,7 +347,7 @@
           <li>Noch nicht öffentlich: Die App wird gerade über TestFlight getestet. Sobald sie fertig ist, steht sie hier.</li>
           <li>Verbindet sich mit jedem VNC-Server, hat aber keinen eigenen: Ein iPad lässt sich damit nicht fernsteuern.</li>
           <li>Finger, Apple Pencil, Trackpad und Hardware-Tastatur; ⌘ wird zu Strg; Umschalten zwischen den Bildschirmen des Servers.</li>
-          <li>Favoriten mit Passwörtern im Schlüsselbund, Bonjour-Suche im WLAN, <code>vncbeach://name</code> für Kurzbefehle.</li>
+          <li>Gespeicherte Verbindungen mit Passwörtern im Schlüsselbund, Bonjour-Suche im WLAN, <code>vncbeach://name</code> für Kurzbefehle.</li>
         </ul>
       </div>
     </div>
@@ -358,8 +358,8 @@
         <h3>Viewer</h3>
         <div class="who">macOS und Windows, bald iPad und iPhone</div>
         <ul>
-          <li><strong>Favoriten</strong> mit Name, Adresse und Passwort. Doppelklick verbindet.</li>
-          <li><strong>Einstellungen pro Verbindung:</strong> Farbtiefe bis 256 Farben für langsame Leitungen, Nur ansehen, Originalgröße oder ans Fenster angepasst, Vollbild beim Verbinden. Alles mit Standardwerten, die jeder Favorit einzeln überschreiben kann.</li>
+          <li><strong>Weitere Verbindungen</strong> mit Name, Adresse und Passwort für Rechner ohne Konto. Ein Klick verbindet.</li>
+          <li><strong>Einstellungen pro Verbindung:</strong> Farbtiefe bis 256 Farben für langsame Leitungen, Nur ansehen, Originalgröße oder ans Fenster angepasst, Vollbild beim Verbinden. Alles mit Standardwerten, die jede gespeicherte Verbindung einzeln überschreiben kann.</li>
           <li><strong>ZRLE-Kodierung</strong> und Auflösungswechsel mitten in der Sitzung.</li>
           <li><strong>Zwischenablage</strong> in beide Richtungen, ganz ohne Zutun: was du lokal kopierst, kannst du drüben einfügen und umgekehrt.</li>
           <li><strong>Strg wird Cmd</strong> und Cmd wird Strg, sobald auf der anderen Seite ein Mac bzw. ein Windows-PC steht. Strg+Alt+Entf gibt es per Knopf.</li>
@@ -396,7 +396,7 @@
 <section class="sand" id="loslegen">
   <div class="wrap">
     <h2>Loslegen</h2>
-    <p class="intro">Eine Datei, keine Installation. Beim ersten Start zeigt der Viewer links die Favoriten und auf Windows den Stand des eigenen Servers.</p>
+    <p class="intro">Eine Datei, keine Installation. Beim ersten Start zeigt der Viewer die Computer des Kontos, weitere Verbindungen und den Stand des eigenen Servers.</p>
     <div class="steps three">
       <div class="os">
         <h3>Auf Windows</h3>
@@ -409,7 +409,7 @@
       <div class="os">
         <h3>Auf dem Mac</h3>
         <ol>
-          <li>Den Viewer laden und starten, Favoriten anlegen, verbinden.</li>
+          <li>Den Viewer laden und starten, anmelden oder eine Verbindung anlegen, verbinden.</li>
           <li>Soll der Mac selbst erreichbar sein: entweder unter „Dieser Computer“ den VNC-Beach-Server einschalten (mit Zwischenablage), oder die Bildschirmfreigabe von macOS nutzen (Systemeinstellungen → Allgemein → Teilen).</li>
           <li>Für den Kommandozeilen-Server braucht das Terminal Bildschirmaufnahme und Bedienungshilfen in den Datenschutz-Einstellungen.</li>
         </ol>
@@ -417,7 +417,7 @@
       <div class="os">
         <h3>Auf iPad und iPhone <span class="soon">Bald</span></h3>
         <p>Die App ist noch in der Testphase und nicht öffentlich erhältlich. Wer selbst bauen will, findet sie im Repository unter <code>apps/ios</code> (iOS 18 oder neuer, Xcode nötig).</p>
-        <p>Geplant: Favorit anlegen, tippen, verbunden. Finger, Apple Pencil, Trackpad und Hardware-Tastatur, dazu eine Zusatzleiste mit Esc, Strg, Alt, Win, Pfeilen und Strg+Alt+Entf.</p>
+        <p>Geplant: Verbindung anlegen, tippen, verbunden. Finger, Apple Pencil, Trackpad und Hardware-Tastatur, dazu eine Zusatzleiste mit Esc, Strg, Alt, Win, Pfeilen und Strg+Alt+Entf.</p>
       </div>
     </div>
     <div class="note" id="ohne-monitor">

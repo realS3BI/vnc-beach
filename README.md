@@ -29,9 +29,9 @@ Version 0.2.5. Umgesetzt:
 - Kamera vom Viewer (in Erprobung): Die Webcam eines Windows-Viewers erscheint auf dem Mac als Kamera „VNC Beach“ für FaceTime, Zoom, Teams usw.
 - Auflösungswechsel während der Sitzung (DesktopSize)
 - Mehrere Bildschirme: Der Server teilt standardmäßig alle Bildschirme als einen virtuellen Schreibtisch (auch für fremde Viewer) und meldet die Anordnung per ExtendedDesktopSize; VNC-Beach-Viewer und iPad-App schalten in der Sitzung auf einen einzelnen Bildschirm um und fordern dann nur noch diesen Ausschnitt an
-- Viewer mit Übersicht als Kartenraster (Favoriten, Kontogeräte, dieser Computer); jede Verbindung öffnet ein eigenes Fenster, das sich an den entfernten Bildschirm anpasst, und mehrere Sitzungen laufen nebeneinander
-- Favoriten im Viewer: mehrere Rechner mit Name, Adresse und Passwort speichern, bearbeiten und mit einem Klick verbinden
-- Einstellungen pro Verbindung (Farbtiefe, Nur ansehen, Darstellung, Zwischenablage, Vollbild, Fenstergröße) mit Standardwerten, die jeder Favorit einzeln überschreibt
+- Viewer mit Übersicht als Kartenraster (Computer des Kontos, weitere Verbindungen, dieser Computer); jede Verbindung öffnet ein eigenes Fenster, das sich an den entfernten Bildschirm anpasst, und mehrere Sitzungen laufen nebeneinander
+- Weitere Verbindungen im Viewer: Rechner ohne Konto mit Name, Adresse und Passwort speichern, bearbeiten und mit einem Klick verbinden
+- Einstellungen pro Verbindung (Farbtiefe, Nur ansehen, Darstellung, Zwischenablage, Vollbild, Fenstergröße) mit Standardwerten, die jede gespeicherte Verbindung einzeln überschreibt
 - Server im selben Programm als Hintergrunddienst mit Symbol im Infobereich bzw. in der Menüleiste, Autostart beim Anmelden und Status im Viewer (Windows und macOS)
 - Vor der Anmeldung erreichbar: Windows-Dienst (auch Sperrbildschirm und UAC), LaunchAgent am macOS-Anmeldefenster, Servermodus für den unbeaufsichtigten Mac
 - Windows ohne eingeschaltete Monitore: automatischer virtueller Bildschirm mit 2560 × 1440 (mit Treiber)
@@ -84,19 +84,19 @@ Das Passwort lässt sich auch über `VNC_BEACH_PASSWORD` setzen.
 ### Viewer
 
 ```sh
-./target/release/beach-viewer                       # Übersicht mit Favoriten
+./target/release/beach-viewer                       # Übersicht mit Konto und Verbindungen
 ./target/release/beach-viewer --background          # Windows: nur Infobereich-Symbol und Server
 ```
 
-Adressen (im Feld oben in der Übersicht oder im Favoriten): `mac.local` (Port 5900), `192.168.1.20:1` (Display 1 = Port 5901), `192.168.1.20::5999` (Port explizit). Der VNC-Beach-Server lauscht standardmäßig auf 5901, also `rechner:1` eingeben.
+Adressen (im Feld oben in der Übersicht oder in einer gespeicherten Verbindung): `mac.local` (Port 5900), `192.168.1.20:1` (Display 1 = Port 5901), `192.168.1.20::5999` (Port explizit). Der VNC-Beach-Server lauscht standardmäßig auf 5901, also `rechner:1` eingeben.
 
-**Übersicht und Sitzungen:** Das Hauptfenster zeigt Favoriten und Kontogeräte als Karten, darunter „Dieser Computer“. Ein Klick auf eine Karte verbindet; jede Sitzung öffnet ein eigenes Fenster. Die Übersicht bleibt offen, eine Sitzung endet mit dem Schließen-Knopf ihres Fensters oder „Trennen“, und weitere Sitzungen lassen sich jederzeit dazu öffnen. Bricht eine Verbindung ab, nennt die Übersicht oben den Grund. Oben im Fenster verbindet das Adressfeld ohne Favorit; verlangt der Server ein Passwort, öffnet sich dafür das Favoritenformular.
+**Übersicht und Sitzungen:** Das Hauptfenster zeigt die Computer des Kontos als Karten, darunter „Weitere Verbindungen“ (selbst gespeicherte Rechner) und „Dieser Computer“. Ein Klick auf eine Karte verbindet; jede Sitzung öffnet ein eigenes Fenster. Die Übersicht bleibt offen, eine Sitzung endet mit dem Schließen-Knopf ihres Fensters oder „Trennen“, und weitere Sitzungen lassen sich jederzeit dazu öffnen. Bricht eine Verbindung ab, nennt die Übersicht oben den Grund. Oben im Fenster verbindet das Adressfeld ohne gespeicherte Verbindung; verlangt der Server ein Passwort, öffnet sich dafür das Verbindungsformular.
 
-**Favoriten:** „+ Neu“ (macOS: Ablage > Neue Verbindung …, ⌘N) öffnet das Formular für Name, Adresse und Passwort; „Als Favorit speichern“ legt die Karte an. „Bearbeiten“ erscheint auf der Karte beim Darüberfahren, ein Rechtsklick bietet Verbinden, Bearbeiten und Löschen. Gelöscht wird erst nach einer Rückfrage. Ab acht Favoriten gibt es ein Suchfeld.
+**Weitere Verbindungen:** „+ Neu“ (macOS: Ablage > Neue Verbindung …, ⌘N) öffnet das Formular für Name, Adresse und Passwort; „Verbindung speichern“ legt die Karte an. „Bearbeiten“ erscheint auf der Karte beim Darüberfahren, ein Rechtsklick bietet Verbinden, Bearbeiten und Löschen. Gelöscht wird erst nach einer Rückfrage. Ab acht Verbindungen gibt es ein Suchfeld.
 
 #### Geräte über alternative Wege erreichen und vorbereiten
 
-Im Desktop-Viewer und in der iOS-App ergänzt **Erreichbarkeit & Start** einen Favoriten um optionale
+Im Desktop-Viewer und in der iOS-App ergänzt **Erreichbarkeit & Start** eine gespeicherte Verbindung um optionale
 Fähigkeiten. Zielgeräte können Macs, Windows-PCs, Linux-Rechner, Raspberry Pis
 oder Server sein. Voraussetzung für die Bildschirmverbindung ist jeweils ein
 erreichbarer Standard-VNC-Server.
@@ -140,7 +140,7 @@ Die bestätigten Geräteschlüssel liegen am Desktop unter `ssh_hosts` neben
 Ändert sich ein Schlüssel, stoppt die Anmeldung vor der Passwortübertragung.
 SSH-Passwörter und Schlüssel-Passphrasen werden nur für den jeweiligen Versuch
 verwendet und nicht gespeichert. Das SSH-Passwort ist unabhängig vom
-VNC-Passwort. Bestehende Favoriten bleiben unverändert nutzbar.
+VNC-Passwort. Bestehende Verbindungen bleiben unverändert nutzbar.
 
 Auf iPhone und iPad unter **Computer bearbeiten → Erreichbarkeit & Start** die
 Angaben ergänzen. Bei nicht erreichbarem VNC erscheinen **Per SSH anmelden** und
@@ -167,7 +167,7 @@ Swift/Rust-Verbindungsablauf im iPad-Simulator.
 
 Die Liste liegt als `servers.toml` unter `~/Library/Application Support/vnc-beach/` (macOS) bzw. `%APPDATA%\vnc-beach\` (Windows) und lässt sich auch von Hand bearbeiten. Passwörter stehen darin im Format von `vncpasswd` (DES mit festem Schlüssel, wie in `~/.vnc/passwd`). Das verhindert nur das Mitlesen auf einen Blick, ist aber keine Verschlüsselung: Wer die Datei hat, kann die Passwörter zurückrechnen.
 
-**Einstellungen pro Verbindung:** Im Favoritenformular klappt „Einstellungen für diese Verbindung“ auf. Jede Zeile steht auf „Standard: …“ oder auf einem eigenen Wert, der nur für diesen Favoriten gilt. Die Werte für alle Verbindungen stehen im Fenster „Einstellungen“ (Knopf oben rechts in der Übersicht, macOS: VNC Beach > Einstellungen …, ⌘,) unter „Verbindungen“. Das Fenster hat außerdem die Bereiche „Dieser Computer“, „Konto“ und „Updates“. Es gibt:
+**Einstellungen pro Verbindung:** Im Verbindungsformular klappt „Einstellungen für diese Verbindung“ auf. Jede Zeile steht auf „Standard: …“ oder auf einem eigenen Wert, der nur für diese Verbindung gilt. Die Werte für alle Verbindungen stehen im Fenster „Einstellungen“ (Knopf oben rechts in der Übersicht, macOS: VNC Beach > Einstellungen …, ⌘,) unter „Verbindungen“. Das Fenster hat außerdem die Bereiche „Dieser Computer“, „Konto“ und „Updates“. Es gibt:
 
 | Einstellung | Werte |
 | --- | --- |
@@ -179,7 +179,7 @@ Die Liste liegt als `servers.toml` unter `~/Library/Application Support/vnc-beac
 | Vollbild | Beim Verbinden / Nein (Knopf „Vollbild" in der Leiste) |
 | Fenstergröße | An den Bildschirm anpassen / Beibehalten |
 
-Die Standardwerte stehen in `config.toml` neben `servers.toml` unter `[viewer]`, die Abweichungen eines Favoriten in `servers.toml` unter `[server.settings]`.
+Die Standardwerte stehen in `config.toml` neben `servers.toml` unter `[viewer]`, die Abweichungen einer gespeicherten Verbindung in `servers.toml` unter `[server.settings]`.
 
 **Mehrere Bildschirme:** Teilt der Server alle Bildschirme (Standard des VNC-Beach-Servers), zeigt der Viewer sie zunächst nebeneinander. Meldet der Server die Anordnung (ExtendedDesktopSize, wie TigerVNC), erscheint in der Leiste „Alle Bildschirme“ mit einem Eintrag je Bildschirm; die Auswahl zeigt nur noch diesen, passt das Fenster an und fordert vom Server nur noch diesen Ausschnitt an (`FramebufferUpdateRequest` mit Rechteck, Standard-RFB).
 
@@ -323,4 +323,4 @@ Logo und Icons entstehen aus `tools/make-logo.py` (`--raster` rendert PNG und IC
 
 ## iPad und iPhone
 
-Unter [`apps/ios/`](apps/ios/README.md) liegt eine native SwiftUI-App (iOS 18+), die den Rust-Client aus `crates/beach-mobile` als statische Bibliothek einbindet. Sie ist fürs iPad gedacht: Touchpad- oder Direktmodus für Finger, absolute Zeigersteuerung mit Trackpad, Maus und Apple Pencil, Hardware-Tastatur mit ⌘-als-Strg-Zuordnung, Bildschirmtastatur mit Zusatzleiste (Esc, Strg, Alt, Win, Pfeile, F-Tasten, Strg+Alt+Entf), wahlweise über dem Bild oder mit verkleinertem Bild, ein schwebendes Scroll-Pad mit Pfeiltasten und Scrollstreifen, Umschalten zwischen den Bildschirmen des Servers, Zoom per Pinch, Zwischenablage in beide Richtungen, Favoriten mit Passwörtern im Schlüsselbund, Bonjour-Suche im WLAN, mehrere Fenster und ein URL-Schema `vncbeach://name` für Kurzbefehle. Über Tailscale genügt als Adresse der Gerätename, etwa `sebastian-pc`. Verteilung per TestFlight über `tools/release-ios.sh`, siehe die README der App.
+Unter [`apps/ios/`](apps/ios/README.md) liegt eine native SwiftUI-App (iOS 18+), die den Rust-Client aus `crates/beach-mobile` als statische Bibliothek einbindet. Sie ist fürs iPad gedacht: Touchpad- oder Direktmodus für Finger, absolute Zeigersteuerung mit Trackpad, Maus und Apple Pencil, Hardware-Tastatur mit ⌘-als-Strg-Zuordnung, Bildschirmtastatur mit Zusatzleiste (Esc, Strg, Alt, Win, Pfeile, F-Tasten, Strg+Alt+Entf), wahlweise über dem Bild oder mit verkleinertem Bild, ein schwebendes Scroll-Pad mit Pfeiltasten und Scrollstreifen, Umschalten zwischen den Bildschirmen des Servers, Zoom per Pinch, Zwischenablage in beide Richtungen, Konto und gespeicherte Verbindungen mit Passwörtern im Schlüsselbund, Bonjour-Suche im WLAN, mehrere Fenster und ein URL-Schema `vncbeach://name` für Kurzbefehle. Über Tailscale genügt als Adresse der Gerätename, etwa `sebastian-pc`. Verteilung per TestFlight über `tools/release-ios.sh`, siehe die README der App.

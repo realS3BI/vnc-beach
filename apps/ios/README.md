@@ -13,11 +13,11 @@ Tailscale-VPN: der Windows-PC ist dann einfach unter seinem Gerätenamen
 | --- | --- |
 | `project.yml` | XcodeGen-Spezifikation; `xcodegen generate` erzeugt `VNCBeach.xcodeproj` |
 | `VNCBeach/App` | Einstieg, Fenster (jede Verbindung kann ein eigenes Fenster sein) |
-| `VNCBeach/Model` | Favoriten (`servers.json` in Application Support), Passwörter im Schlüsselbund, Einstellungen, Konto (`AccountStore`: Koordinationsserver, Sitzung im Schlüsselbund, letzte Geräteliste in `account.json`), Favoriten-Abgleich (`FavoriteSync`, gelöschte Favoriten in `deleted.json`) |
+| `VNCBeach/Model` | Gespeicherte Verbindungen (`servers.json` in Application Support), Passwörter im Schlüsselbund, Einstellungen, Konto (`AccountStore`: Koordinationsserver, Sitzung im Schlüsselbund, letzte Geräteliste in `account.json`), Abgleich der Verbindungen (`FavoriteSync`, gelöschte in `deleted.json`) |
 | `VNCBeach/Core` | `RemoteSession` (Swift-Hülle um die C-API), Keysym-Tabelle, Bonjour-Suche, `AccountAPI` (Anmeldung, Geräteliste, Tickets über URLSession) |
 | `VNCBeach/Screen` | `RemoteScreenView` (UIKit: Gesten, Trackpad, Pencil, Tastatur), Metal-Renderer, Zusatztastenleiste |
 | `VNCBeach/UI` | SwiftUI: Übersicht mit Kacheln (`Cards.swift`, Farben wie `beach-viewer/src/theme.rs`), Bearbeiten, Einstellungen mit Konto, Sitzung mit Werkzeugleiste, „Zum Konto hinzufügen“ (`EnrollView`) |
-| `VNCBeachTests` | Tests für Keysyms, Favoriten, Erreichbarkeit und abbrechbare RFB-Verbindungen |
+| `VNCBeachTests` | Tests für Keysyms, gespeicherte Verbindungen, Erreichbarkeit und abbrechbare RFB-Verbindungen |
 | `ci_scripts/ci_post_clone.sh` | Xcode Cloud: XcodeGen, Rust-Toolchain, Team und Buildnummer |
 | `../../tools/build-ios.sh` | Baut `libbeach_mobile.a`; läuft als Build-Phase vor dem Swift-Build |
 
@@ -195,11 +195,11 @@ in der iPad-Zwischenablage. iOS zeigt beim Lesen einen Hinweis.
 Hintergrund. Beim Zurückkehren verbindet die App automatisch neu, sofern
 sie nicht per „Trennen“ beendet wurde.
 
-**URL-Schema:** `vncbeach://sebastian-pc` öffnet den Favoriten mit diesem
+**URL-Schema:** `vncbeach://sebastian-pc` öffnet die gespeicherte Verbindung mit diesem
 Namen oder Host, etwa aus Kurzbefehlen; unbekannte Hosts werden als
-Favorit angelegt (`?password=…` optional).
+Verbindung angelegt (`?password=…` optional).
 
-**Mehrere Fenster:** Im Kontextmenü eines Favoriten „In neuem Fenster
+**Mehrere Fenster:** Im Kontextmenü einer Verbindung „In neuem Fenster
 öffnen“, für zwei Rechner nebeneinander in Split View oder Stage Manager.
 
 ## Update-Prüfung

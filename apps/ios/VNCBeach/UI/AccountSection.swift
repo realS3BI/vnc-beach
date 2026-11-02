@@ -48,7 +48,7 @@ struct AccountSection: View {
         } footer: {
             Text(
                 account.signedIn
-                    ? "Die Computer deines Kontos und deiner Organisationen stehen in der Übersicht und verbinden ohne VNC-Passwort. Deine Favoriten werden mit deinen anderen Geräten abgeglichen, Passwörter bleiben auf jedem Gerät. Einen Computer fügst du hinzu, indem du dich verbindest und im Menü „Zum Konto hinzufügen …“ wählst."
+                    ? "Die Computer deines Kontos und deiner Organisationen stehen in der Übersicht und verbinden ohne VNC-Passwort. Deine weiteren Verbindungen werden mit deinen anderen Geräten abgeglichen, Passwörter bleiben auf jedem Gerät. Einen Computer fügst du hinzu, indem du dich verbindest und im Menü „Zum Konto hinzufügen …“ wählst."
                     : "Mit einem Konto auf einem VNC-Beach-Koordinationsserver siehst du hier alle Computer, die du am Mac oder PC hinzugefügt hast, und verbindest dich ohne VNC-Passwort. Angemeldet wird mit GitHub oder Google im Browser."
             )
         }
