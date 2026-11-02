@@ -448,18 +448,29 @@ final class AccountLogin: NSObject, ASWebAuthenticationPresentationContextProvid
     }
 }
 
-/// Resumes a continuation at most once.
-@MainActor
-private final class OnceContinuation<T: Sendable> {
-    private var continuation: CheckedContinuation<T, Error>?
+/// Resumes the sign-in continuation at most once, from any thread.
+///
+/// Not generic and not actor-isolated on purpose: the Swift 6.3 optimizer
+/// crashed (EarlyPerfInliner) on the implicit `deinit` of a generic
+/// `@MainActor` class holding a continuation in Release builds.
+private final class OnceContinuation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<String, Error>?
 
-    init(_ continuation: CheckedContinuation<T, Error>) {
+    init(_ continuation: CheckedContinuation<String, Error>) {
         self.continuation = continuation
     }
 
-    func resume(_ result: Result<T, Error>) {
-        continuation?.resume(with: result)
+    func resume(_ result: Result<String, Error>) {
+        lock.lock()
+        let pending = continuation
         continuation = nil
+        lock.unlock()
+        pending?.resume(with: result)
+    }
+
+    deinit {
+        continuation?.resume(throwing: AccountError.failed("Anmeldung abgebrochen."))
     }
 }
 
