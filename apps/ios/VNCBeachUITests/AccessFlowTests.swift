@@ -5,7 +5,7 @@ nonisolated final class AccessFlowTests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         app.launch()
-        app.buttons["Computer hinzufügen"].firstMatch.tap()
+        app.buttons["Verbindung hinzufügen"].firstMatch.tap()
         let name = "Erreichbarkeit UI-Test \(UUID().uuidString.prefix(6))"
         app.textFields["Name"].tap()
         app.textFields["Name"].typeText(name)
