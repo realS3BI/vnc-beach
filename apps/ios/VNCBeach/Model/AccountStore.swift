@@ -121,7 +121,32 @@ final class AccountStore {
         return orgs.contains { $0.id == org.id && ($0.role == "admin" || $0.role == "owner") }
     }
 
-    /// Outdated devices "Alle aktualisieren" applies to.
+    /// Why `device` can't be updated from here, if that's the case.
+    func updateBlocker(_ device: AccountDevice) -> String? {
+        if !device.canUpdate {
+            if Self.older(device.version, than: "0.4.1") {
+                return "Version \(device.version) nimmt Updates aus der Ferne noch nicht an. Einmal am Gerät selbst aktualisieren, danach geht es auch von hier."
+            }
+            return "Das Gerät kann sich nicht selbst aktualisieren, etwa weil VNC Beach dort nicht im Programme-Ordner liegt. Bitte am Gerät selbst aktualisieren."
+        }
+        if device.update.pending || mayUpdate(device) { return nil }
+        return "Nur Administratoren der Organisation können dieses Gerät aktualisieren."
+    }
+
+    /// `a` < `b` for versions like `0.4.1`; false when either doesn't parse.
+    static func older(_ a: String, than b: String) -> Bool {
+        func key(_ text: String) -> [Int]? {
+            let core = text.trimmingCharacters(in: .whitespaces).drop { $0 == "v" || $0 == "V" }
+                .split(whereSeparator: { $0 == "-" || $0 == "+" }).first.map(String.init) ?? ""
+            let parts = core.split(separator: ".").map { Int($0) }
+            guard (1...3).contains(parts.count), parts.allSatisfy({ $0 != nil }) else { return nil }
+            return parts.compactMap { $0 } + Array(repeating: 0, count: 3 - parts.count)
+        }
+        guard let a = key(a), let b = key(b) else { return false }
+        return a.lexicographicallyPrecedes(b)
+    }
+
+    /// Outdated devices "Alle Geräte aktualisieren" applies to.
     var outdated: [AccountDevice] { devices.filter { $0.outdated && mayUpdate($0) } }
 
     /// Asks the devices to update themselves to the latest release.

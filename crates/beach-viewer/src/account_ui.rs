@@ -20,6 +20,8 @@ use crate::theme::{self, Kind, Palette};
 const REFRESH: Duration = Duration::from_secs(30);
 /// Faster while a remote update is pending, to show how it goes.
 const REFRESH_UPDATING: Duration = Duration::from_secs(5);
+/// The first release that updates itself when the coordination server asks.
+const REMOTE_UPDATE_SINCE: &str = "0.4.1";
 
 /// The browser sign-in's result and its cancel flag.
 type LoginTask = (Receiver<Result<AccountConfig, String>>, Arc<AtomicBool>);
@@ -82,7 +84,28 @@ impl AccountPanel {
         }
     }
 
-    /// Outdated devices "Alle aktualisieren" applies to.
+    /// Why the user can't update the device from here, if that's the case.
+    pub fn update_blocker(&self, device: &Device) -> Option<String> {
+        if !device.can_update {
+            return Some(if beach_account::api::version_older(&device.version, REMOTE_UPDATE_SINCE) {
+                format!(
+                    "Version {} nimmt Updates aus der Ferne noch nicht an. Einmal am Gerät selbst \
+                     aktualisieren, danach geht es auch von hier.",
+                    device.version
+                )
+            } else {
+                "Das Gerät kann sich nicht selbst aktualisieren, etwa weil VNC Beach dort nicht im \
+                 Programme-Ordner liegt. Bitte am Gerät selbst aktualisieren."
+                    .into()
+            });
+        }
+        if device.update.pending() || self.may_update(device) {
+            return None;
+        }
+        Some("Nur Administratoren der Organisation können dieses Gerät aktualisieren.".into())
+    }
+
+    /// Outdated devices "Alle Geräte aktualisieren" applies to.
     pub fn outdated(&self) -> Vec<Device> {
         self.devices
             .iter()
@@ -176,7 +199,14 @@ impl AccountPanel {
                 self.refresh = None;
                 self.refreshed = Some(Instant::now());
                 match result {
-                    Ok((me, devices, favorites)) => {
+                    Ok((me, mut devices, favorites)) => {
+                        // A device older than this viewer is outdated even
+                        // when the coordination server doesn't know the
+                        // latest release (no release check configured).
+                        let current = env!("CARGO_PKG_VERSION");
+                        for device in &mut devices {
+                            device.outdated |= beach_account::api::version_older(&device.version, current);
+                        }
                         self.me = Some(me);
                         self.devices = devices;
                         self.favorites.extend(favorites);

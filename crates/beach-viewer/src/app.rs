@@ -994,7 +994,7 @@ impl App {
                     ui.spinner();
                     ui.label(RichText::new("Updates werden angefordert …").color(p.weak));
                 } else if signed_in && !outdated.is_empty() {
-                    let label = format!("Alle aktualisieren ({})", outdated.len());
+                    let label = format!("Alle Geräte aktualisieren ({})", outdated.len());
                     if theme::Button::new(&label, Kind::Secondary)
                         .small()
                         .show(ui)
@@ -1112,26 +1112,36 @@ impl App {
                     _ => response.response,
                 };
                 let may_update = self.account.may_update(device) && !self.account.requesting();
+                let failed = matches!(device.update, beach_account::api::UpdateState::Failed { .. });
+                let blocker = self.account.update_blocker(device);
                 response.context_menu(|ui| {
                     ui.set_min_width(180.0);
                     if ui.button("Verbinden").clicked() {
                         connect = Some(device.clone());
                         ui.close();
                     }
-                    let label = if device.outdated { "Aktualisieren" } else { "Neueste Version installieren" };
-                    let item = ui.add_enabled(may_update, egui::Button::new(label));
-                    let item = if device.can_update {
-                        item
-                    } else {
-                        item.on_disabled_hover_text("Diese Version lässt sich nur am Gerät selbst aktualisieren.")
-                    };
-                    if item.clicked() {
-                        update = Some(vec![device.clone()]);
-                        ui.close();
+                    // Like the web UI: offered only when there is something
+                    // to install, or to retry.
+                    if device.outdated || failed {
+                        let label = if failed { "Erneut aktualisieren" } else { "Aktualisieren" };
+                        let item = ui.add_enabled(may_update, egui::Button::new(label));
+                        let item = match &blocker {
+                            Some(why) => item.on_disabled_hover_text(why),
+                            None => item,
+                        };
+                        if item.clicked() {
+                            update = Some(vec![device.clone()]);
+                            ui.close();
+                        }
                     }
                     if !device.version.is_empty() {
                         ui.separator();
-                        ui.label(RichText::new(format!("Version {}", device.version)).color(p.weak));
+                        let version = if device.outdated {
+                            format!("Version {}", device.version)
+                        } else {
+                            format!("Version {} (aktuell)", device.version)
+                        };
+                        ui.label(RichText::new(version).color(p.weak));
                     }
                 });
             });
@@ -1724,7 +1734,61 @@ impl App {
                 .color(p.weak),
         );
         ui.hyperlink_to("Alle Versionen auf GitHub", "https://github.com/realS3BI/vnc-beach/releases");
+        self.account_updates(ui, ctx, &p);
         crash_reports(ui, &p);
+    }
+
+    /// The account's devices in the Updates tab: which are outdated, and
+    /// "Alle Geräte aktualisieren" for those that update from here.
+    fn account_updates(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, p: &Palette) {
+        let devices = self.account.devices();
+        if !self.config.account.signed_in() || devices.is_empty() {
+            return;
+        }
+        ui.add_space(20.0);
+        ui.label(RichText::new("Geräte im Konto").font(theme::bold(15.0)).color(p.text));
+        let behind: Vec<_> = devices.iter().filter(|d| d.outdated).collect();
+        if behind.is_empty() {
+            ui.label(RichText::new(format!("Alle {} Geräte sind auf dem neuesten Stand.", devices.len())).color(p.weak));
+            return;
+        }
+        let text = match behind.len() {
+            1 => format!("1 von {} Geräten hat eine ältere Version:", devices.len()),
+            n => format!("{n} von {} Geräten haben eine ältere Version:", devices.len()),
+        };
+        ui.label(RichText::new(text).color(p.weak));
+        for device in &behind {
+            let line = match device.update {
+                beach_account::api::UpdateState::Requested { .. } | beach_account::api::UpdateState::Running { .. } => {
+                    format!("{} ({}): wird aktualisiert …", device.name, device.version)
+                }
+                _ => match self.account.update_blocker(device) {
+                    Some(why) => format!("{} ({}): {why}", device.name, device.version),
+                    None => format!("{} ({})", device.name, device.version),
+                },
+            };
+            ui.label(RichText::new(format!("• {line}")).size(12.5).color(p.weak));
+        }
+        ui.add_space(8.0);
+        let ready = self.account.outdated();
+        if self.account.requesting() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(RichText::new("Updates werden angefordert …").color(p.weak));
+            });
+        } else if !ready.is_empty() {
+            let label = format!("Alle Geräte aktualisieren ({})", ready.len());
+            if theme::Button::new(&label, Kind::Secondary)
+                .show(ui)
+                .on_hover_text(
+                    "Die Geräte installieren die neueste Version und starten neu. Laufende Verbindungen \
+                     zu ihnen brechen dabei kurz ab.",
+                )
+                .clicked()
+            {
+                self.account.request_updates(ctx, &self.config, ready);
+            }
+        }
     }
 
     /// Picks up results of the update check or install.

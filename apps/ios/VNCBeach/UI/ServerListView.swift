@@ -198,7 +198,7 @@ struct ServerListView: View {
                         ProgressView()
                         Text("Updates werden angefordert …").font(.subheadline).foregroundStyle(Beach.weak)
                     } else if !account.outdated.isEmpty {
-                        Button("Alle aktualisieren (\(account.outdated.count))") { confirmUpdateAll = true }
+                        Button("Alle Geräte aktualisieren (\(account.outdated.count))") { confirmUpdateAll = true }
                             .buttonStyle(.bordered)
                             .tint(Beach.accent)
                     }
@@ -212,7 +212,7 @@ struct ServerListView: View {
                 "\(account.outdated.count) Geräte aktualisieren?", isPresented: $confirmUpdateAll,
                 titleVisibility: .visible
             ) {
-                Button("Alle aktualisieren") { Task { await account.requestUpdates(account.outdated) } }
+                Button("Alle Geräte aktualisieren") { Task { await account.requestUpdates(account.outdated) } }
             } message: {
                 Text("Die Geräte installieren die neueste Version und starten neu. Laufende Verbindungen zu ihnen brechen dabei kurz ab.")
             }
@@ -286,19 +286,22 @@ struct ServerListView: View {
                     openWindow(value: account.server(for: device).id)
                 }
             }
-            Button(device.outdated ? "Aktualisieren" : "Neueste Version installieren", systemImage: "arrow.down.circle") {
-                Task { await account.requestUpdates([device]) }
+            let failed: Bool = { if case .failed = device.update { return true } else { return false } }()
+            if device.outdated || failed {
+                Button(failed ? "Erneut aktualisieren" : "Aktualisieren", systemImage: "arrow.down.circle") {
+                    Task { await account.requestUpdates([device]) }
+                }
+                .disabled(!account.mayUpdate(device) || account.requestingUpdates)
             }
-            .disabled(!account.mayUpdate(device) || account.requestingUpdates)
             Divider()
             if case .failed(let error) = device.update {
                 Text("Update fehlgeschlagen: \(error)")
             }
             if !device.version.isEmpty {
-                Text("Version \(device.version)")
+                Text(device.outdated ? "Version \(device.version)" : "Version \(device.version) (aktuell)")
             }
-            if !device.canUpdate {
-                Text("Diese Version lässt sich nur am Gerät selbst aktualisieren.")
+            if device.outdated || failed, let why = account.updateBlocker(device) {
+                Text(why)
             }
         }
     }

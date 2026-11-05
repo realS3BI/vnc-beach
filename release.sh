@@ -5,7 +5,9 @@
 #   2. runs the tests, builds the macOS app here and the Windows exe on the PC,
 #   3. commits "Release vX.Y.Z", tags it and pushes main and the tag,
 #   4. creates the GitHub release with VNC-Beach-macOS.zip and
-#      VNC-Beach-Windows.exe (the apps' updaters download these),
+#      VNC-Beach-Windows.exe (the apps' updaters download these); the
+#      published release starts .github/workflows/coord-release.yml, which
+#      publishes the coordination server (branch `release`, GHCR image),
 #   5. builds the iPad/iPhone app and uploads it to TestFlight
 #      (tools/release-ios.sh, App Store Connect API key in
 #      ~/.config/vnc-beach/appstoreconnect.env).

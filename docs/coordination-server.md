@@ -75,16 +75,17 @@ Es reicht ein Anbieter. Als Rückruf-Adresse gilt jeweils `https://DEINE-ADRESSE
 
 ### 2. Starten
 
-Mit Docker (Image aus diesem Repository bauen):
+Mit Docker und dem fertigen Image, das zu jeder Version erscheint:
 
 ```sh
-docker build -f crates/beach-coord/Dockerfile -t beach-coord .
 docker run -d --name beach-coord --restart unless-stopped \
   -p 127.0.0.1:8080:8080 -v beach-coord:/data \
   -e BEACH_PUBLIC_URL=https://beach.example.com \
   -e GITHUB_CLIENT_ID=… -e GITHUB_CLIENT_SECRET=… \
-  beach-coord
+  ghcr.io/reals3bi/beach-coord:latest
 ```
+
+Das Image lässt sich auch selbst bauen: `docker build -f crates/beach-coord/Dockerfile -t beach-coord .`
 
 Oder direkt: `cargo build --release -p beach-coord`, dann `target/release/beach-coord --public-url https://beach.example.com --data /var/lib/beach-coord` mit denselben Umgebungsvariablen.
 
@@ -98,6 +99,15 @@ Oder direkt: `cargo build --release -p beach-coord`, dann `target/release/beach-
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Anmeldung mit Google |
 | `BEACH_RELEASE_URL` / `--release-url` | GitHub-API-Adresse der neuesten Version, gegen die Geräte als veraltet gelten. Leer schaltet die Prüfung ab; *Aktualisieren* gibt es dann nur für Geräte mit fehlgeschlagenem Update. |
 | `BEACH_DEV_LOGIN=1` / `--dev-login` | Anmeldung nur mit einem Namen, **nur zum Entwickeln**: Jeder kann sich als jeder ausgeben. |
+
+### Auf neue Versionen aktualisieren
+
+Der Server sollte zur Version der Apps passen. Zu jeder veröffentlichten Version von VNC Beach erscheint er in zwei Formen (`.github/workflows/coord-release.yml`), passend für jeden Hoster:
+
+- **Image:** `ghcr.io/reals3bi/beach-coord:latest`, außerdem `:X.Y.Z` und `:X.Y`. Wer `:latest` nutzt, holt neue Versionen mit `docker pull` und einem Neustart des Containers oder automatisch mit einem Werkzeug wie Watchtower.
+- **Branch `release`:** zeigt immer auf die neueste Version. Hoster, die aus Git bauen und bei einem Push neu deployen (Coolify, Dokploy, CapRover …), stellt man auf diesen Branch statt auf `main`, mit `crates/beach-coord/Dockerfile` als Dockerfile. Dann deployen sie genau bei einer neuen Version und nicht bei jeder Änderung.
+
+Wer einen Fork betreibt, bekommt beides in seinem eigenen Repository, ohne zusätzliche Secrets.
 
 ### 3. HTTPS davor
 
