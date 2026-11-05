@@ -156,16 +156,20 @@ fn main() {
 }
 
 /// The service modes have no console: they log to a file in
-/// `%ProgramData%\VNC Beach`.
+/// `%ProgramData%\VNC Beach`. Every mode writes crash reports (see
+/// `beach_server::crash`): the service modes next to their log, the viewer
+/// and the tray process into `crash::user_dir`.
 fn init_logging(args: &Args) {
-    let file = if args.service {
-        "service.log"
+    let (mode, file) = if args.service {
+        ("service", "service.log")
     } else if args.service_agent {
-        "agent.log"
+        ("agent", "agent.log")
     } else if args.install_service || args.uninstall_service || args.install_display_driver || args.install_server_mode {
-        "setup.log"
+        ("setup", "setup.log")
+    } else if args.background {
+        ("background", "")
     } else {
-        ""
+        ("viewer", "")
     };
     let default = if file.is_empty() { "warn" } else { "info" };
     let mut builder = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default));
@@ -174,7 +178,11 @@ fn init_logging(args: &Args) {
             builder.target(env_logger::Target::Pipe(Box::new(log)));
         }
     }
-    builder.init();
+    beach_server::crash::init_logging(builder);
+    let crashes = if file.is_empty() { beach_server::crash::user_dir() } else { service::crash_dir() };
+    if let Some(dir) = crashes {
+        beach_server::crash::install(&dir, env!("CARGO_PKG_VERSION"), mode);
+    }
 }
 
 /// Runs one of the setup or service modes (`--service`, `--install-service`,

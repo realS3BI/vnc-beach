@@ -1724,6 +1724,7 @@ impl App {
                 .color(p.weak),
         );
         ui.hyperlink_to("Alle Versionen auf GitHub", "https://github.com/realS3BI/vnc-beach/releases");
+        crash_reports(ui, &p);
     }
 
     /// Picks up results of the update check or install.
@@ -1755,6 +1756,53 @@ impl App {
             },
             _ => {}
         }
+    }
+}
+
+/// The crash report section at the end of the Updates tab: how many
+/// `beach_server::crash` reports exist (own and the service's) and buttons to
+/// open their folders.
+fn crash_reports(ui: &mut egui::Ui, p: &Palette) {
+    let own = beach_server::crash::user_dir();
+    let service = crate::service::crash_dir();
+    let count = |dir: &Option<std::path::PathBuf>| dir.as_deref().map_or(0, |d| beach_server::crash::reports(d).len());
+    let (own_count, service_count) = (count(&own), count(&service));
+    ui.add_space(24.0);
+    ui.label(RichText::new("Absturzberichte").font(theme::bold(15.0)).color(p.text));
+    let total = own_count + service_count;
+    ui.label(
+        RichText::new(match total {
+            0 => "Bisher ist VNC Beach nicht abgestürzt.".to_string(),
+            1 => "Ein Absturzbericht ist gespeichert.".to_string(),
+            n => format!("{n} Absturzberichte sind gespeichert."),
+        })
+        .color(p.weak),
+    );
+    ui.horizontal(|ui| {
+        for (dir, n, label) in [(&own, own_count, "Berichte öffnen"), (&service, service_count, "Berichte des Dienstes öffnen")] {
+            if let Some(dir) = dir.as_deref().filter(|_| n > 0) {
+                if theme::Button::new(label, Kind::Secondary).show(ui).clicked() {
+                    open_folder(dir);
+                }
+            }
+        }
+    });
+    ui.add_space(4.0);
+    ui.label(
+        RichText::new(
+            "Stürzt VNC Beach ab, entsteht eine Textdatei mit Fehlermeldung, Ablauf und den letzten Protokollzeilen. \
+             Sie bleibt auf diesem Gerät, die neuesten 20 werden aufbewahrt.",
+        )
+        .size(12.5)
+        .color(p.weak),
+    );
+}
+
+/// Shows `dir` in Finder or Explorer.
+fn open_folder(dir: &std::path::Path) {
+    let program = if cfg!(windows) { "explorer" } else if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    if let Err(e) = std::process::Command::new(program).arg(dir).spawn() {
+        log::warn!("open {}: {e}", dir.display());
     }
 }
 

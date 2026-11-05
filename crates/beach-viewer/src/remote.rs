@@ -318,7 +318,7 @@ impl Remote {
                     });
                 }
             });
-        self.files.show(ctx, self.settings.view_only);
+        self.files.show(ctx, &self.label, self.settings.view_only);
         Ok(())
     }
 

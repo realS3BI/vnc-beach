@@ -4,6 +4,7 @@
 pub mod camera;
 pub mod capture;
 pub mod clipboard;
+pub mod crash;
 #[cfg(windows)]
 pub mod desktop;
 pub mod files;

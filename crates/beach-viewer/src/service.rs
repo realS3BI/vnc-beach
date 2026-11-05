@@ -130,13 +130,23 @@ pub use platform::{install, on_console, uninstall};
 /// Beach` on Windows, `/Library/Logs/VNC Beach` on macOS (these run as
 /// root there).
 pub fn log_path(name: &str) -> Option<PathBuf> {
-    let dir = if cfg!(target_os = "macos") {
-        PathBuf::from("/Library/Logs/VNC Beach")
-    } else {
-        PathBuf::from(std::env::var_os("ProgramData")?).join("VNC Beach")
-    };
+    let dir = log_dir()?;
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir.join(name))
+}
+
+/// The directory of `log_path`, not created.
+pub fn log_dir() -> Option<PathBuf> {
+    if cfg!(target_os = "macos") {
+        Some(PathBuf::from("/Library/Logs/VNC Beach"))
+    } else {
+        Some(PathBuf::from(std::env::var_os("ProgramData")?).join("VNC Beach"))
+    }
+}
+
+/// Crash reports of the service, the agent and the setup.
+pub fn crash_dir() -> Option<PathBuf> {
+    Some(log_dir()?.join("crashes"))
 }
 
 /// Arguments the service passes on to the agent.

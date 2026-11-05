@@ -353,8 +353,9 @@ impl<'a> Button<'a> {
         self
     }
 
-    pub fn show(self, ui: &mut egui::Ui) -> Response {
-        let p = Palette::of(ui);
+    /// The text and the size [`Self::show`] will take, for layouts that
+    /// must know a height before they place the button.
+    fn layout(&self, ui: &egui::Ui) -> (Arc<egui::Galley>, Vec2) {
         let font = match (self.kind, self.small) {
             (Kind::Primary, false) => semibold(14.0),
             (Kind::Primary, true) => semibold(12.5),
@@ -371,6 +372,16 @@ impl<'a> Button<'a> {
             Vec2::new(16.0, 7.0)
         };
         let size = (galley.size() + 2.0 * padding).max(self.min_size);
+        (galley, size)
+    }
+
+    pub fn size(&self, ui: &egui::Ui) -> Vec2 {
+        self.layout(ui).1
+    }
+
+    pub fn show(self, ui: &mut egui::Ui) -> Response {
+        let p = Palette::of(ui);
+        let (galley, size) = self.layout(ui);
         let sense = if self.enabled {
             Sense::click()
         } else {
@@ -500,6 +511,136 @@ pub fn paint_play(ui: &egui::Ui, center: Pos2, size: f32, color: Color32) {
     ];
     ui.painter()
         .add(egui::Shape::convex_polygon(points, color, Stroke::NONE));
+}
+
+/// One line of text, cut off with an ellipsis at `max_width`.
+pub fn elided(ui: &egui::Ui, text: &str, font: FontId, color: Color32, max_width: f32) -> Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::single_section(
+        text.to_owned(),
+        egui::TextFormat {
+            font_id: font,
+            color,
+            ..Default::default()
+        },
+    );
+    job.wrap = egui::text::TextWrapping {
+        max_width: max_width.max(0.0),
+        max_rows: 1,
+        break_anywhere: true,
+        overflow_character: Some('…'),
+    };
+    ui.painter().layout_job(job)
+}
+
+/// Line drawings for the file browser, each about 16 points across.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Icon {
+    Up,
+    Refresh,
+    Folder,
+    File,
+    Download,
+}
+
+pub fn paint_icon(painter: &egui::Painter, icon: Icon, center: Pos2, color: Color32) {
+    let at = |x: f32, y: f32| center + Vec2::new(x, y);
+    let stroke = Stroke::new(1.6, color);
+    let line = |points: Vec<Pos2>| {
+        painter.add(egui::Shape::line(points, stroke));
+    };
+    match icon {
+        Icon::Up => {
+            line(vec![at(0.0, 6.5), at(0.0, -6.0)]);
+            line(vec![at(-5.0, -1.0), at(0.0, -6.0), at(5.0, -1.0)]);
+        }
+        Icon::Download => {
+            line(vec![at(0.0, -7.0), at(0.0, 2.5)]);
+            line(vec![at(-4.0, -1.5), at(0.0, 2.5), at(4.0, -1.5)]);
+            line(vec![at(-6.5, 3.5), at(-6.5, 6.5), at(6.5, 6.5), at(6.5, 3.5)]);
+        }
+        Icon::Refresh => {
+            // Clockwise from the lower right, round the left, to the upper
+            // right, where the arc runs out into the corner of the arrow head.
+            let point = |degrees: f32| {
+                let (sin, cos) = degrees.to_radians().sin_cos();
+                at(5.8 * cos - 0.7, 5.8 * sin)
+            };
+            let mut arc: Vec<Pos2> = (0..=24).map(|i| point(20.0 + i as f32 * 12.3)).collect();
+            let corner = at(6.4, -1.2);
+            arc.push(corner);
+            line(arc);
+            line(vec![
+                corner + Vec2::new(0.0, -4.4),
+                corner,
+                corner + Vec2::new(-4.4, 0.0),
+            ]);
+        }
+        Icon::Folder => {
+            let tab = vec![at(-8.0, -6.5), at(-2.5, -6.5), at(0.0, -3.5), at(-8.0, -3.5)];
+            painter.add(egui::Shape::convex_polygon(tab, color, Stroke::NONE));
+            painter.rect_filled(
+                Rect::from_min_max(at(-8.0, -4.5), at(8.0, 6.5)),
+                CornerRadius::same(2),
+                color,
+            );
+        }
+        Icon::File => {
+            let thin = Stroke::new(1.3, color);
+            painter.add(egui::Shape::closed_line(
+                vec![
+                    at(-5.5, -8.0),
+                    at(1.5, -8.0),
+                    at(5.5, -4.0),
+                    at(5.5, 8.0),
+                    at(-5.5, 8.0),
+                ],
+                thin,
+            ));
+            painter.add(egui::Shape::line(
+                vec![at(1.5, -8.0), at(1.5, -4.0), at(5.5, -4.0)],
+                thin,
+            ));
+        }
+    }
+}
+
+/// A square button that shows only an icon; `label` is its tooltip and its
+/// name for screen readers.
+pub fn icon_button(ui: &mut egui::Ui, icon: Icon, label: &str, enabled: bool) -> Response {
+    let p = Palette::of(ui);
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(32.0), sense);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+    if ui.is_rect_visible(rect) {
+        let hovered = enabled && response.hovered();
+        if hovered || response.has_focus() {
+            ui.painter()
+                .rect_filled(rect, CornerRadius::same(8), p.button_hover);
+        }
+        let color = if !enabled {
+            p.weak.gamma_multiply(0.45)
+        } else if hovered {
+            p.text
+        } else {
+            p.weak
+        };
+        paint_icon(ui.painter(), icon, rect.center(), color);
+        if enabled && response.has_focus() {
+            ui.painter().rect_stroke(
+                rect,
+                CornerRadius::same(8),
+                Stroke::new(2.0, p.accent),
+                StrokeKind::Outside,
+            );
+        }
+    }
+    if enabled {
+        response
+            .on_hover_text(label)
+            .on_hover_cursor(CursorIcon::PointingHand)
+    } else {
+        response
+    }
 }
 
 /// A chevron pointing right (`>`) or down, for collapsibles and rows.

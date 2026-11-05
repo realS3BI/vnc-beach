@@ -631,6 +631,7 @@ dependencies = [
  "enigo",
  "env_logger",
  "gethostname",
+ "libc",
  "log",
  "rand",
  "rfb",

@@ -37,7 +37,12 @@ struct Args {
 }
 
 fn main() -> anyhow::Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    beach_server::crash::init_logging(env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("info"),
+    ));
+    if let Some(dir) = beach_server::crash::user_dir() {
+        beach_server::crash::install(&dir, env!("CARGO_PKG_VERSION"), "server");
+    }
     let args = Args::parse();
 
     if args.list_displays {
