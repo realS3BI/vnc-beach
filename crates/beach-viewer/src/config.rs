@@ -55,6 +55,10 @@ pub struct ServerConfig {
     #[serde(with = "display_toml")]
     pub display: Display,
     pub fps: u32,
+    /// Keep the display awake while the server runs, so the screen saver
+    /// and display sleep don't start and the computer doesn't lock itself.
+    /// Opt-in: an unattended computer is then open to anyone at its screen.
+    pub keep_awake: bool,
     /// Registered with a coordination server: accept its tickets and
     /// report addresses there.
     pub device: Option<DeviceLink>,
@@ -102,6 +106,7 @@ impl Default for ServerConfig {
             service_declined: String::new(),
             display: Display::All,
             fps: 60,
+            keep_awake: false,
             device: None,
         }
     }

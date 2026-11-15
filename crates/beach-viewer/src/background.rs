@@ -432,6 +432,8 @@ struct State {
     error: Option<String>,
     /// Lets viewers add this computer to their account.
     enroller: Option<Arc<dyn beach_server::session::Enroller>>,
+    /// Held while the server runs with `keep_awake` set.
+    awake: Option<beach_server::awake::KeepAwake>,
 }
 
 impl State {
@@ -465,6 +467,7 @@ impl State {
             running: None,
             error: None,
             enroller: None,
+            awake: None,
         }
     }
 
@@ -491,6 +494,28 @@ impl State {
 
     /// Starts, stops or restarts the server so it matches the config.
     fn apply(&mut self) {
+        self.apply_server();
+        let want = self.server.is_some() && self.config.server.keep_awake;
+        if want != self.awake.is_some() {
+            self.awake = if want {
+                match beach_server::awake::KeepAwake::new() {
+                    Ok(awake) => {
+                        log::info!("keeping the display awake");
+                        Some(awake)
+                    }
+                    Err(e) => {
+                        log::warn!("cannot keep the display awake: {e}");
+                        None
+                    }
+                }
+            } else {
+                log::info!("no longer keeping the display awake");
+                None
+            };
+        }
+    }
+
+    fn apply_server(&mut self) {
         // Screen Sharing opens login window sessions of its own next to the
         // signed-in user's; launchd starts the agent there too. Serving from
         // such a session would take the port from the tray process and show

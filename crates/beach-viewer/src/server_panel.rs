@@ -650,7 +650,22 @@ impl ServerPanel {
                 ui.label("Eingabe");
                 ui.checkbox(&mut draft.view_only, "Nur ansehen, keine Eingaben annehmen");
                 ui.end_row();
+                ui.label("Sperre");
+                ui.checkbox(&mut draft.keep_awake, "Bildschirm wach halten, nicht sperren");
+                ui.end_row();
             });
+        if draft.keep_awake {
+            ui.label(
+                RichText::new(
+                    "Bildschirmschoner und Ruhezustand des Bildschirms starten nicht mehr, solange \
+                     die Freigabe läuft. So sperrt sich der Computer nicht und du musst dich beim \
+                     Verbinden nicht anmelden. Dafür ist er auch für jeden offen, der davor sitzt. \
+                     Nach einem Neustart ist die Anmeldung trotzdem nötig.",
+                )
+                .size(12.5)
+                .color(theme::CORAL),
+            );
+        }
         ui.add_space(8.0);
         ui.label(
             RichText::new("Das Passwort gilt nur für die ersten 8 Zeichen (VNC-Standard).")

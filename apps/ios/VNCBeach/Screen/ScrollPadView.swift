@@ -16,7 +16,6 @@ struct ScrollPadView: View {
                 .frame(width: 36, height: 5)
                 .padding(.top, 8)
                 .padding(.bottom, 2)
-                .frame(maxWidth: .infinity)
                 .contentShape(Rectangle())
                 .accessibilityLabel("Scroll-Pad verschieben")
             HStack(alignment: .center, spacing: 12) {
@@ -26,6 +25,8 @@ struct ScrollPadView: View {
             .padding(.horizontal, 12)
             .padding(.bottom, 12)
         }
+        // Only as large as the keys and the strip, whatever space the parent offers.
+        .fixedSize()
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
         .offset(offset)

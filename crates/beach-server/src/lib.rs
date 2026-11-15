@@ -1,6 +1,7 @@
 //! The VNC Beach server as a library: `beach-server` is a thin CLI around it,
 //! and the viewer embeds it as its background server on Windows.
 
+pub mod awake;
 pub mod camera;
 pub mod capture;
 pub mod clipboard;
