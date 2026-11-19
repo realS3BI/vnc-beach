@@ -12,6 +12,7 @@ use crate::client::{Connection, Notice, Region, RemoteKind, Screen};
 use crate::clipboard::Clipboard;
 use crate::keys;
 use crate::settings::{Scaling, Settings, Shortcuts};
+use crate::theme;
 
 /// Why a session ended.
 pub enum Close {
@@ -319,7 +320,47 @@ impl Remote {
                 }
             });
         self.files.show(ctx, &self.label, self.settings.view_only);
+        self.input_paused_notice(ctx);
         Ok(())
+    }
+
+    /// Says why mouse and keyboard don't reach the remote computer while
+    /// the viewer holds them back, and offers to take control again.
+    fn input_paused_notice(&mut self, ctx: &egui::Context) {
+        let (text, action) = if self.settings.view_only {
+            ("Maus und Tastatur sind aus: „Nur ansehen“ ist an.", "Steuern")
+        } else if self.files.open {
+            ("Maus und Tastatur sind pausiert, solange „Dateien“ offen ist.", "Dateien schließen")
+        } else {
+            return;
+        };
+        let p = theme::Palette::for_context(ctx);
+        let mut clicked = false;
+        egui::Area::new(egui::Id::new("input-paused"))
+            .anchor(egui::Align2::CENTER_TOP, Vec2::new(0.0, TOOLBAR_HEIGHT + 10.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                theme::card_in(&p)
+                    .stroke(egui::Stroke::new(1.0, theme::AMBER))
+                    .inner_margin(egui::Margin::symmetric(12, 8))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            theme::dot(ui, theme::AMBER);
+                            ui.label(egui::RichText::new(text).font(theme::semibold(13.0)).color(p.text));
+                            clicked = theme::Button::new(action, theme::Kind::Secondary)
+                                .small()
+                                .show(ui)
+                                .clicked();
+                        });
+                    });
+            });
+        if clicked {
+            if self.settings.view_only {
+                self.settings.view_only = false;
+            } else {
+                self.files.open = false;
+            }
+        }
     }
 
     /// Draws the remote screen into `image_rect` and forwards input from `area`.
